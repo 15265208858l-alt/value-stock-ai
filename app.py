@@ -1,7 +1,6 @@
 import streamlit as st
 import akshare as ak
 import pandas as pd
-import time
 
 st.set_page_config(
     page_title="ValueStock AI",
@@ -10,51 +9,61 @@ st.set_page_config(
 )
 
 st.title("📈 ValueStock AI")
-st.subheader("真实A股数据测试版")
+st.subheader("A股真实行情数据测试版")
 
 st.divider()
 
 
-@st.cache_data(ttl=300)
-def get_stock_info(stock_code, retry=3):
-    last_error = None
-
-    for i in range(retry):
-        try:
-            data = ak.stock_individual_info_em(
-                symbol=stock_code
-            )
-
-            if data is not None and not data.empty:
-                return data
-
-        except Exception as e:
-            last_error = e
-            time.sleep(2)
-
-    raise last_error
+def get_market_code(stock_code):
+    """根据股票代码判断上海/深圳市场"""
+    if stock_code.startswith(("6", "68")):
+        return "sh" + stock_code
+    elif stock_code.startswith(("0", "3")):
+        return "sz" + stock_code
+    elif stock_code.startswith(("4", "8")):
+        return "bj" + stock_code
+    else:
+        return stock_code
 
 
-@st.cache_data(ttl=300)
-def get_stock_history(stock_code, retry=3):
-    last_error = None
+def get_realtime_data(stock_code):
+    """优先使用新浪获取实时A股行情"""
+    try:
+        spot = ak.stock_zh_a_spot()
 
-    for i in range(retry):
-        try:
-            data = ak.stock_zh_a_hist(
-                symbol=stock_code,
-                period="daily",
-                adjust="qfq"
-            )
+        if spot is None or spot.empty:
+            return None
 
-            if data is not None and not data.empty:
-                return data
+        result = spot[spot["代码"].astype(str) == stock_code]
 
-        except Exception as e:
-            last_error = e
-            time.sleep(2)
+        if result.empty:
+            return None
 
-    raise last_error
+        return result.iloc[0]
+
+    except Exception as e:
+        raise RuntimeError(f"新浪实时行情获取失败：{e}")
+
+
+def get_history_data(stock_code):
+    """使用腾讯获取历史行情"""
+    market_code = get_market_code(stock_code)
+
+    try:
+        hist = ak.stock_zh_a_hist_tx(
+            symbol=market_code,
+            start_date="20250101",
+            end_date="20500101",
+            adjust=""
+        )
+
+        if hist is None or hist.empty:
+            return None
+
+        return hist
+
+    except Exception as e:
+        raise RuntimeError(f"腾讯历史行情获取失败：{e}")
 
 
 stock_code = st.text_input(
@@ -62,7 +71,7 @@ stock_code = st.text_input(
     placeholder="例如：600089、000333、601899"
 )
 
-if st.button("获取A股数据", type="primary"):
+if st.button("获取真实A股数据", type="primary"):
 
     if not stock_code:
         st.warning("⚠️ 请先输入股票代码")
@@ -70,65 +79,106 @@ if st.button("获取A股数据", type="primary"):
 
     stock_code = stock_code.strip()
 
-    st.info(f"正在获取 {stock_code} 的A股数据，请稍候...")
+    if len(stock_code) != 6 or not stock_code.isdigit():
+        st.error("❌ 股票代码应输入6位数字，例如 600089")
+        st.stop()
 
-    # =============================
-    # 1. 股票基本信息
-    # =============================
+    st.info(f"正在获取 {stock_code} 的真实A股数据，请稍候……")
+
+    # =========================
+    # 1. 实时行情
+    # =========================
 
     try:
-        info = get_stock_info(stock_code)
+        realtime = get_realtime_data(stock_code)
 
-        st.success("✅ 股票基本信息获取成功")
+        if realtime is None:
+            st.error("❌ 没有找到该股票的实时行情")
+        else:
+            st.success("✅ 实时A股行情获取成功")
 
-        st.subheader("📌 股票基本信息")
+            st.subheader("📌 最新行情")
 
-        if isinstance(info, pd.DataFrame):
-
-            info.columns = ["项目", "数值"]
+            realtime_display = pd.DataFrame({
+                "指标": [
+                    "股票代码",
+                    "股票名称",
+                    "最新价",
+                    "涨跌幅",
+                    "涨跌额",
+                    "今开",
+                    "最高",
+                    "最低",
+                    "成交量",
+                    "成交额"
+                ],
+                "数据": [
+                    realtime.get("代码", "-"),
+                    realtime.get("名称", "-"),
+                    realtime.get("最新价", "-"),
+                    realtime.get("涨跌幅", "-"),
+                    realtime.get("涨跌额", "-"),
+                    realtime.get("今开", "-"),
+                    realtime.get("最高", "-"),
+                    realtime.get("最低", "-"),
+                    realtime.get("成交量", "-"),
+                    realtime.get("成交额", "-")
+                ]
+            })
 
             st.dataframe(
-                info,
+                realtime_display,
                 use_container_width=True,
                 hide_index=True
             )
 
     except Exception as e:
-
-        st.error("❌ 股票基本信息获取失败")
-
+        st.error("❌ 实时行情获取失败")
         st.code(str(e))
 
-    # =============================
+    # =========================
     # 2. 历史行情
-    # =============================
+    # =========================
 
     try:
+        history = get_history_data(stock_code)
 
-        hist = get_stock_history(stock_code)
+        if history is None:
+            st.error("❌ 没有获取到历史行情")
+        else:
+            st.success("✅ 腾讯历史行情获取成功")
 
-        st.success("✅ 历史行情获取成功")
+            st.subheader("📈 最近30个交易日")
 
-        st.subheader("📈 最近30个交易日行情")
+            history_30 = history.tail(30)
 
-        hist = hist.tail(30)
+            st.dataframe(
+                history_30,
+                use_container_width=True,
+                hide_index=True
+            )
 
-        st.dataframe(
-            hist,
-            use_container_width=True,
-            hide_index=True
-        )
+            # 收盘价走势图
+            if "date" in history.columns and "close" in history.columns:
 
-        if "日期" in hist.columns and "收盘" in hist.columns:
+                chart = history_30.copy()
 
-            chart_data = hist.set_index("日期")["收盘"]
+                chart["date"] = pd.to_datetime(chart["date"])
 
-            st.subheader("📊 收盘价走势")
+                chart = chart.set_index("date")
 
-            st.line_chart(chart_data)
+                st.subheader("📊 收盘价走势")
+
+                st.line_chart(chart["close"])
 
     except Exception as e:
-
         st.error("❌ 历史行情获取失败")
-
         st.code(str(e))
+
+
+st.divider()
+
+st.caption(
+    "数据来源：AKShare 可用公开数据接口。"
+    "数据仅用于研究分析，不构成投资建议。"
+)
