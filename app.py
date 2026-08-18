@@ -2000,3 +2000,701 @@ st.info(
     "注意：V8是规则化财务评分，不代表股票未来收益率。"
     "下一阶段将加入估值、行业比较和护城河分析。"
 )
+# =====================================================
+# V9：价值估值系统
+# =====================================================
+
+st.divider()
+
+st.header("💰 V9：价值估值系统")
+
+st.caption(
+    "基于当前价格、EPS、每股净资产及目标PE/PB进行情景估值。"
+    "该模块用于研究和估值敏感性分析，不代表未来股价预测。"
+)
+
+
+# =====================================================
+# 1. 获取当前价格
+# =====================================================
+
+valuation_price = None
+
+try:
+
+    if history is not None and not history.empty:
+
+        valuation_price = float(
+            history.iloc[-1]["close"]
+        )
+
+except Exception:
+
+    valuation_price = None
+
+
+# =====================================================
+# 2. 寻找 EPS
+# =====================================================
+
+eps_col = find_column(
+    indicators,
+    [
+        "摊薄每股收益(元)",
+        "摊薄每股收益",
+        "基本每股收益(元)",
+        "基本每股收益",
+        "每股收益(元)",
+        "每股收益"
+    ]
+)
+
+
+# =====================================================
+# 3. 寻找每股净资产
+# =====================================================
+
+bvps_col = find_column(
+    indicators,
+    [
+        "每股净资产(元)",
+        "每股净资产",
+        "股东权益比率",
+        "归属母公司股东的每股净资产"
+    ]
+)
+
+
+latest_eps = None
+
+latest_bvps = None
+
+
+if eps_col:
+
+    latest_eps = safe_float(
+        indicators.iloc[0][eps_col]
+    )
+
+
+if bvps_col:
+
+    latest_bvps = safe_float(
+        indicators.iloc[0][bvps_col]
+    )
+
+
+# =====================================================
+# 4. 当前估值
+# =====================================================
+
+st.subheader(
+    "📊 当前估值基础数据"
+)
+
+
+v1, v2, v3, v4 = st.columns(4)
+
+
+v1.metric(
+    "当前参考价",
+    "暂无"
+    if valuation_price is None
+    else f"{valuation_price:.2f} 元"
+)
+
+
+v2.metric(
+    "最新EPS",
+    "暂无"
+    if latest_eps is None
+    else f"{latest_eps:.2f} 元"
+)
+
+
+v3.metric(
+    "每股净资产",
+    "暂无"
+    if latest_bvps is None
+    else f"{latest_bvps:.2f} 元"
+)
+
+
+current_pe = None
+
+current_pb = None
+
+
+if (
+    valuation_price is not None
+    and latest_eps is not None
+    and latest_eps > 0
+):
+
+    current_pe = (
+        valuation_price
+        / latest_eps
+    )
+
+
+if (
+    valuation_price is not None
+    and latest_bvps is not None
+    and latest_bvps > 0
+):
+
+    current_pb = (
+        valuation_price
+        / latest_bvps
+    )
+
+
+v4.metric(
+    "当前PE",
+    "暂无"
+    if current_pe is None
+    else f"{current_pe:.2f}"
+)
+
+
+st.write(
+    "当前PB："
+    + (
+        "暂无"
+        if current_pb is None
+        else f"{current_pb:.2f}"
+    )
+)
+
+
+# =====================================================
+# 5. 估值参数
+# =====================================================
+
+st.subheader(
+    "⚙️ 估值参数"
+)
+
+st.caption(
+    "下面参数不是程序强行决定的，而是允许你根据公司质量和行业特点调整。"
+)
+
+
+# -----------------------------------------------------
+# 默认参数
+# -----------------------------------------------------
+
+default_pe_conservative = 12.0
+
+default_pe_normal = 16.0
+
+default_pe_optimistic = 20.0
+
+
+if roe is not None:
+
+    if roe >= 20:
+
+        default_pe_conservative = 15.0
+        default_pe_normal = 20.0
+        default_pe_optimistic = 25.0
+
+    elif roe >= 15:
+
+        default_pe_conservative = 13.0
+        default_pe_normal = 17.0
+        default_pe_optimistic = 22.0
+
+    elif roe >= 10:
+
+        default_pe_conservative = 10.0
+        default_pe_normal = 14.0
+        default_pe_optimistic = 18.0
+
+
+col_a, col_b, col_c = st.columns(3)
+
+
+pe_conservative = col_a.number_input(
+    "保守目标PE",
+    min_value=5.0,
+    max_value=50.0,
+    value=default_pe_conservative,
+    step=1.0
+)
+
+
+pe_normal = col_b.number_input(
+    "中性目标PE",
+    min_value=5.0,
+    max_value=50.0,
+    value=default_pe_normal,
+    step=1.0
+)
+
+
+pe_optimistic = col_c.number_input(
+    "乐观目标PE",
+    min_value=5.0,
+    max_value=50.0,
+    value=default_pe_optimistic,
+    step=1.0
+)
+
+
+# =====================================================
+# 6. PE估值
+# =====================================================
+
+pe_conservative_value = None
+
+pe_normal_value = None
+
+pe_optimistic_value = None
+
+
+if latest_eps is not None and latest_eps > 0:
+
+    pe_conservative_value = (
+        latest_eps
+        * pe_conservative
+    )
+
+    pe_normal_value = (
+        latest_eps
+        * pe_normal
+    )
+
+    pe_optimistic_value = (
+        latest_eps
+        * pe_optimistic
+    )
+
+
+st.subheader(
+    "📈 PE情景估值"
+)
+
+
+pe_table = pd.DataFrame({
+
+    "情景": [
+        "保守",
+        "中性",
+        "乐观"
+    ],
+
+    "目标PE": [
+        pe_conservative,
+        pe_normal,
+        pe_optimistic
+    ],
+
+    "估算价格": [
+        pe_conservative_value,
+        pe_normal_value,
+        pe_optimistic_value
+    ]
+
+})
+
+
+if pe_conservative_value is not None:
+
+    pe_table["估算价格"] = (
+        pe_table["估算价格"]
+        .round(2)
+    )
+
+
+st.dataframe(
+    pe_table,
+    use_container_width=True,
+    hide_index=True
+)
+
+
+# =====================================================
+# 7. PB估值
+# =====================================================
+
+pb_conservative = st.number_input(
+    "保守目标PB",
+    min_value=0.5,
+    max_value=10.0,
+    value=1.2,
+    step=0.1
+)
+
+
+pb_normal = st.number_input(
+    "中性目标PB",
+    min_value=0.5,
+    max_value=10.0,
+    value=1.8,
+    step=0.1
+)
+
+
+pb_optimistic = st.number_input(
+    "乐观目标PB",
+    min_value=0.5,
+    max_value=10.0,
+    value=2.5,
+    step=0.1
+)
+
+
+pb_conservative_value = None
+
+pb_normal_value = None
+
+pb_optimistic_value = None
+
+
+if latest_bvps is not None and latest_bvps > 0:
+
+    pb_conservative_value = (
+        latest_bvps
+        * pb_conservative
+    )
+
+    pb_normal_value = (
+        latest_bvps
+        * pb_normal
+    )
+
+    pb_optimistic_value = (
+        latest_bvps
+        * pb_optimistic
+    )
+
+
+st.subheader(
+    "📚 PB情景估值"
+)
+
+
+pb_table = pd.DataFrame({
+
+    "情景": [
+        "保守",
+        "中性",
+        "乐观"
+    ],
+
+    "目标PB": [
+        pb_conservative,
+        pb_normal,
+        pb_optimistic
+    ],
+
+    "估算价格": [
+        pb_conservative_value,
+        pb_normal_value,
+        pb_optimistic_value
+    ]
+
+})
+
+
+if pb_conservative_value is not None:
+
+    pb_table["估算价格"] = (
+        pb_table["估算价格"]
+        .round(2)
+    )
+
+
+st.dataframe(
+    pb_table,
+    use_container_width=True,
+    hide_index=True
+)
+
+
+# =====================================================
+# 8. PE + PB综合估值
+# =====================================================
+
+st.subheader(
+    "🎯 综合估值"
+)
+
+
+# -----------------------------------------------------
+# 根据ROE决定PE/PB权重
+# -----------------------------------------------------
+
+if roe is not None and roe >= 15:
+
+    pe_weight = 0.7
+
+    pb_weight = 0.3
+
+elif roe is not None and roe >= 10:
+
+    pe_weight = 0.6
+
+    pb_weight = 0.4
+
+else:
+
+    pe_weight = 0.5
+
+    pb_weight = 0.5
+
+
+st.write(
+    f"当前模型权重：PE {pe_weight:.0%} / PB {pb_weight:.0%}"
+)
+
+
+conservative_value = None
+
+normal_value = None
+
+optimistic_value = None
+
+
+if (
+    pe_conservative_value is not None
+    and pb_conservative_value is not None
+):
+
+    conservative_value = (
+        pe_conservative_value * pe_weight
+        + pb_conservative_value * pb_weight
+    )
+
+
+if (
+    pe_normal_value is not None
+    and pb_normal_value is not None
+):
+
+    normal_value = (
+        pe_normal_value * pe_weight
+        + pb_normal_value * pb_weight
+    )
+
+
+if (
+    pe_optimistic_value is not None
+    and pb_optimistic_value is not None
+):
+
+    optimistic_value = (
+        pe_optimistic_value * pe_weight
+        + pb_optimistic_value * pb_weight
+    )
+
+
+valuation_table = pd.DataFrame({
+
+    "估值情景": [
+        "保守",
+        "中性",
+        "乐观"
+    ],
+
+    "综合估算价格": [
+        conservative_value,
+        normal_value,
+        optimistic_value
+    ]
+
+})
+
+
+if conservative_value is not None:
+
+    valuation_table[
+        "综合估算价格"
+    ] = (
+        valuation_table[
+            "综合估算价格"
+        ]
+        .round(2)
+    )
+
+
+st.dataframe(
+    valuation_table,
+    use_container_width=True,
+    hide_index=True
+)
+
+
+# =====================================================
+# 9. 建仓价 / 重仓价 / 高估价
+# =====================================================
+
+st.subheader(
+    "💰 投资价格区间"
+)
+
+
+entry_price = None
+
+heavy_position_price = None
+
+high_valuation_price = None
+
+
+if normal_value is not None:
+
+    # 建仓：合理价值的85%
+    entry_price = (
+        normal_value
+        * 0.85
+    )
+
+    # 重仓：合理价值的70%
+    heavy_position_price = (
+        normal_value
+        * 0.70
+    )
+
+
+if conservative_value is not None:
+
+    high_valuation_price = (
+        optimistic_value
+    )
+
+
+p1, p2, p3, p4 = st.columns(4)
+
+
+p1.metric(
+    "建仓参考价",
+    "暂无"
+    if entry_price is None
+    else f"{entry_price:.2f} 元"
+)
+
+
+p2.metric(
+    "重仓参考价",
+    "暂无"
+    if heavy_position_price is None
+    else f"{heavy_position_price:.2f} 元"
+)
+
+
+p3.metric(
+    "中性合理价",
+    "暂无"
+    if normal_value is None
+    else f"{normal_value:.2f} 元"
+)
+
+
+p4.metric(
+    "高估参考价",
+    "暂无"
+    if high_valuation_price is None
+    else f"{high_valuation_price:.2f} 元"
+)
+
+
+# =====================================================
+# 10. 当前价格判断
+# =====================================================
+
+st.subheader(
+    "🔍 当前价格判断"
+)
+
+
+if (
+    valuation_price is not None
+    and normal_value is not None
+):
+
+    discount = (
+        normal_value
+        / valuation_price
+        - 1
+    ) * 100
+
+
+    st.metric(
+        "相对中性合理价值空间",
+        f"{discount:.2f}%"
+    )
+
+
+    if valuation_price <= heavy_position_price:
+
+        st.success(
+            "🟢 当前价格进入模型重仓价值区间。"
+        )
+
+    elif valuation_price <= entry_price:
+
+        st.success(
+            "🟢 当前价格进入模型建仓区间。"
+        )
+
+    elif valuation_price <= normal_value:
+
+        st.info(
+            "🟡 当前价格低于模型中性合理价值，但安全边际一般。"
+        )
+
+    elif valuation_price <= optimistic_value:
+
+        st.warning(
+            "🟠 当前价格高于中性合理价值，建议等待更好的安全边际。"
+        )
+
+    else:
+
+        st.error(
+            "🔴 当前价格超过乐观估值区间，模型认为估值偏高。"
+        )
+
+else:
+
+    st.warning(
+        "⚠️ 当前数据不足，暂时无法完成PE/PB估值。"
+    )
+
+
+# =====================================================
+# 11. 估值风险提示
+# =====================================================
+
+st.subheader(
+    "⚠️ 估值模型风险提示"
+)
+
+
+st.write(
+    "1. PE估值高度依赖未来盈利的稳定性。"
+)
+
+st.write(
+    "2. PB估值对资产质量和ROE非常敏感。"
+)
+
+st.write(
+    "3. 周期股、强周期行业和利润波动较大的公司，不宜简单套用固定PE。"
+)
+
+st.write(
+    "4. 当前V9还没有加入DCF、行业估值分位数和同行业估值比较。"
+)
+
+st.write(
+    "5. 因此当前价格区间属于模型参考值，不应单独作为买卖依据。"
+)
+
+
+st.divider()
+
+st.caption(
+    "V9：PE + PB情景估值。下一阶段将加入行业估值、DCF及综合投资评级。"
+)
