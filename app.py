@@ -1339,3 +1339,664 @@ st.caption(
     "V7：正式加入长期价值投资10步分析框架。"
     "当前版本强调数据真实性，不对尚未接入的数据进行虚假评分。"
 )
+# =====================================================
+# V8：5年财务质量综合评分
+# =====================================================
+
+st.divider()
+
+st.header("⭐ V8：5年财务质量综合评分")
+
+st.caption(
+    "基于最近多个年度的财务指标，判断企业盈利能力、成长性、"
+    "财务安全和现金流质量。"
+)
+
+
+# -----------------------------------------------------
+# 找日期字段
+# -----------------------------------------------------
+
+date_col = None
+
+date_candidates = [
+    "日期",
+    "报告期",
+    "报告日期",
+    "截止日期",
+    "报告期末"
+]
+
+for col in date_candidates:
+
+    if col in indicators.columns:
+        date_col = col
+        break
+
+
+# -----------------------------------------------------
+# 建立年度数据
+# -----------------------------------------------------
+
+trend = indicators.copy()
+
+
+if date_col is not None:
+
+    trend[date_col] = pd.to_datetime(
+        trend[date_col],
+        errors="coerce"
+    )
+
+    trend = trend.dropna(
+        subset=[date_col]
+    )
+
+    trend["年份"] = (
+        trend[date_col]
+        .dt.year
+    )
+
+    # 每年保留一条
+    trend = (
+        trend
+        .sort_values(date_col)
+        .groupby("年份")
+        .tail(1)
+    )
+
+    trend = (
+        trend
+        .sort_values("年份")
+        .tail(5)
+    )
+
+else:
+
+    # 如果接口没有日期字段，则直接取最近5行
+    trend = indicators.head(5).copy()
+
+    trend["年份"] = [
+        f"第{i + 1}期"
+        for i in range(len(trend))
+    ]
+
+
+# -----------------------------------------------------
+# 找关键字段
+# -----------------------------------------------------
+
+roe_col_v8 = find_column(
+    trend,
+    [
+        "加权净资产收益率(%)",
+        "加权净资产收益率",
+        "净资产收益率(%)",
+        "净资产收益率"
+    ]
+)
+
+
+revenue_growth_col_v8 = find_column(
+    trend,
+    [
+        "主营业务收入增长率(%)",
+        "主营业务收入增长率"
+    ]
+)
+
+
+profit_growth_col_v8 = find_column(
+    trend,
+    [
+        "净利润增长率(%)",
+        "净利润增长率"
+    ]
+)
+
+
+debt_col_v8 = find_column(
+    trend,
+    [
+        "资产负债率(%)",
+        "资产负债率"
+    ]
+)
+
+
+cashflow_col_v8 = find_column(
+    trend,
+    [
+        "每股经营性现金流(元)",
+        "每股经营性现金流"
+    ]
+)
+
+
+# -----------------------------------------------------
+# 提取数据
+# -----------------------------------------------------
+
+roe_values = []
+
+revenue_growth_values = []
+
+profit_growth_values = []
+
+debt_values = []
+
+cashflow_values = []
+
+
+if roe_col_v8:
+
+    roe_values = [
+        safe_float(x)
+        for x in trend[roe_col_v8]
+    ]
+
+
+if revenue_growth_col_v8:
+
+    revenue_growth_values = [
+        safe_float(x)
+        for x in trend[revenue_growth_col_v8]
+    ]
+
+
+if profit_growth_col_v8:
+
+    profit_growth_values = [
+        safe_float(x)
+        for x in trend[profit_growth_col_v8]
+    ]
+
+
+if debt_col_v8:
+
+    debt_values = [
+        safe_float(x)
+        for x in trend[debt_col_v8]
+    ]
+
+
+if cashflow_col_v8:
+
+    cashflow_values = [
+        safe_float(x)
+        for x in trend[cashflow_col_v8]
+    ]
+
+
+# -----------------------------------------------------
+# 去掉空值
+# -----------------------------------------------------
+
+roe_clean = [
+    x for x in roe_values
+    if x is not None
+]
+
+
+revenue_clean = [
+    x for x in revenue_growth_values
+    if x is not None
+]
+
+
+profit_clean = [
+    x for x in profit_growth_values
+    if x is not None
+]
+
+
+debt_clean = [
+    x for x in debt_values
+    if x is not None
+]
+
+
+cashflow_clean = [
+    x for x in cashflow_values
+    if x is not None
+]
+
+
+# -----------------------------------------------------
+# 显示5年趋势表
+# -----------------------------------------------------
+
+display_columns = {}
+
+if roe_col_v8:
+    display_columns["ROE"] = trend[roe_col_v8]
+
+if revenue_growth_col_v8:
+    display_columns["营收增长率"] = trend[revenue_growth_col_v8]
+
+if profit_growth_col_v8:
+    display_columns["净利润增长率"] = trend[profit_growth_col_v8]
+
+if debt_col_v8:
+    display_columns["资产负债率"] = trend[debt_col_v8]
+
+if cashflow_col_v8:
+    display_columns["每股经营现金流"] = trend[cashflow_col_v8]
+
+
+if display_columns:
+
+    trend_display = pd.DataFrame(
+        display_columns
+    )
+
+    trend_display.insert(
+        0,
+        "年份",
+        trend["年份"].astype(str).values
+    )
+
+    st.subheader(
+        "📅 最近5期核心财务指标"
+    )
+
+    st.dataframe(
+        trend_display,
+        use_container_width=True,
+        hide_index=True
+    )
+
+
+# -----------------------------------------------------
+# 计算评分
+# -----------------------------------------------------
+
+roe_score = 0
+
+growth_score = 0
+
+profit_score = 0
+
+debt_score = 0
+
+cash_score = 0
+
+
+# =====================================================
+# ROE评分 20分
+# =====================================================
+
+if roe_clean:
+
+    avg_roe = sum(roe_clean) / len(roe_clean)
+
+    min_roe = min(roe_clean)
+
+    if avg_roe >= 20 and min_roe >= 15:
+
+        roe_score = 20
+
+    elif avg_roe >= 15 and min_roe >= 10:
+
+        roe_score = 17
+
+    elif avg_roe >= 10:
+
+        roe_score = 13
+
+    elif avg_roe >= 5:
+
+        roe_score = 8
+
+    else:
+
+        roe_score = 3
+
+
+# =====================================================
+# 营收成长评分 20分
+# =====================================================
+
+if revenue_clean:
+
+    avg_revenue_growth = (
+        sum(revenue_clean)
+        / len(revenue_clean)
+    )
+
+    positive_years = sum(
+        1
+        for x in revenue_clean
+        if x >= 0
+    )
+
+    if (
+        avg_revenue_growth >= 15
+        and positive_years >= 4
+    ):
+
+        growth_score = 20
+
+    elif (
+        avg_revenue_growth >= 8
+        and positive_years >= 4
+    ):
+
+        growth_score = 16
+
+    elif avg_revenue_growth >= 0:
+
+        growth_score = 11
+
+    else:
+
+        growth_score = 4
+
+
+# =====================================================
+# 净利润成长评分 20分
+# =====================================================
+
+if profit_clean:
+
+    avg_profit_growth = (
+        sum(profit_clean)
+        / len(profit_clean)
+    )
+
+    positive_profit_years = sum(
+        1
+        for x in profit_clean
+        if x >= 0
+    )
+
+    if (
+        avg_profit_growth >= 20
+        and positive_profit_years >= 4
+    ):
+
+        profit_score = 20
+
+    elif (
+        avg_profit_growth >= 10
+        and positive_profit_years >= 4
+    ):
+
+        profit_score = 16
+
+    elif avg_profit_growth >= 0:
+
+        profit_score = 11
+
+    else:
+
+        profit_score = 4
+
+
+# =====================================================
+# 财务安全评分 20分
+# =====================================================
+
+if debt_clean:
+
+    avg_debt = (
+        sum(debt_clean)
+        / len(debt_clean)
+    )
+
+    debt_change = (
+        debt_clean[-1]
+        - debt_clean[0]
+    )
+
+    if avg_debt < 50 and debt_change <= 5:
+
+        debt_score = 20
+
+    elif avg_debt < 60 and debt_change <= 8:
+
+        debt_score = 17
+
+    elif avg_debt < 70:
+
+        debt_score = 13
+
+    elif avg_debt < 80:
+
+        debt_score = 8
+
+    else:
+
+        debt_score = 3
+
+
+# =====================================================
+# 现金流评分 20分
+# =====================================================
+
+if cashflow_clean:
+
+    positive_cashflow_years = sum(
+        1
+        for x in cashflow_clean
+        if x > 0
+    )
+
+    avg_cashflow = (
+        sum(cashflow_clean)
+        / len(cashflow_clean)
+    )
+
+    if (
+        positive_cashflow_years >= 4
+        and avg_cashflow > 0
+    ):
+
+        cash_score = 20
+
+    elif positive_cashflow_years >= 3:
+
+        cash_score = 16
+
+    elif positive_cashflow_years >= 2:
+
+        cash_score = 10
+
+    elif avg_cashflow > 0:
+
+        cash_score = 7
+
+    else:
+
+        cash_score = 3
+
+
+# -----------------------------------------------------
+# 总分
+# -----------------------------------------------------
+
+financial_quality_score = (
+    roe_score
+    + growth_score
+    + profit_score
+    + debt_score
+    + cash_score
+)
+
+
+# -----------------------------------------------------
+# 综合评级
+# -----------------------------------------------------
+
+if financial_quality_score >= 85:
+
+    financial_rating = "优秀"
+
+elif financial_quality_score >= 75:
+
+    financial_rating = "良好"
+
+elif financial_quality_score >= 60:
+
+    financial_rating = "一般"
+
+else:
+
+    financial_rating = "偏弱"
+
+
+# -----------------------------------------------------
+# 显示评分
+# -----------------------------------------------------
+
+st.subheader(
+    "🎯 财务质量评分"
+)
+
+
+score_col1, score_col2 = st.columns(2)
+
+
+score_col1.metric(
+    "财务质量总分",
+    f"{financial_quality_score} / 100"
+)
+
+
+score_col2.metric(
+    "综合评级",
+    financial_rating
+)
+
+
+# -----------------------------------------------------
+# 分项评分
+# -----------------------------------------------------
+
+st.subheader(
+    "📊 分项评分"
+)
+
+
+score_table = pd.DataFrame({
+    "项目": [
+        "ROE及盈利能力",
+        "营收成长",
+        "净利润成长",
+        "财务安全",
+        "现金流质量"
+    ],
+    "得分": [
+        f"{roe_score}/20",
+        f"{growth_score}/20",
+        f"{profit_score}/20",
+        f"{debt_score}/20",
+        f"{cash_score}/20"
+    ]
+})
+
+
+st.dataframe(
+    score_table,
+    use_container_width=True,
+    hide_index=True
+)
+
+
+# -----------------------------------------------------
+# 趋势解读
+# -----------------------------------------------------
+
+st.subheader(
+    "🔍 五年趋势解读"
+)
+
+
+if roe_clean:
+
+    st.write(
+        f"**ROE：** 最近5期平均 "
+        f"{sum(roe_clean) / len(roe_clean):.2f}%"
+    )
+
+
+if revenue_clean:
+
+    st.write(
+        f"**营收增长：** 最近5期平均 "
+        f"{sum(revenue_clean) / len(revenue_clean):.2f}%"
+    )
+
+
+if profit_clean:
+
+    st.write(
+        f"**净利润增长：** 最近5期平均 "
+        f"{sum(profit_clean) / len(profit_clean):.2f}%"
+    )
+
+
+if debt_clean:
+
+    st.write(
+        f"**资产负债率：** 最近一期 "
+        f"{debt_clean[-1]:.2f}%"
+    )
+
+
+if cashflow_clean:
+
+    positive_years = sum(
+        1
+        for x in cashflow_clean
+        if x > 0
+    )
+
+    st.write(
+        f"**经营现金流：** 最近5期中有 "
+        f"{positive_years} 期为正"
+    )
+
+
+# -----------------------------------------------------
+# 最终判断
+# -----------------------------------------------------
+
+st.subheader(
+    "🏆 V8财务质量结论"
+)
+
+
+if financial_quality_score >= 85:
+
+    st.success(
+        "🟢 财务质量优秀："
+        "盈利能力、成长性、财务安全和现金流整体表现较强。"
+    )
+
+elif financial_quality_score >= 75:
+
+    st.success(
+        "🟢 财务质量良好："
+        "整体具备较好的长期财务基础，但仍需结合估值和行业竞争力判断。"
+    )
+
+elif financial_quality_score >= 60:
+
+    st.warning(
+        "🟡 财务质量一般："
+        "部分核心指标表现尚可，但存在需要进一步研究的地方。"
+    )
+
+else:
+
+    st.error(
+        "🔴 财务质量偏弱："
+        "不建议仅凭短期利润增长做长期投资判断。"
+    )
+
+
+st.info(
+    "注意：V8是规则化财务评分，不代表股票未来收益率。"
+    "下一阶段将加入估值、行业比较和护城河分析。"
+)
