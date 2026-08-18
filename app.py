@@ -46,7 +46,23 @@ def get_history_data(stock_code):
     return data
 
 
-def get_financial_indicators(stock_code):
+def get_stock_basic_info(stock_code):
+    """
+    获取股票基础信息
+    """
+
+    try:
+        data = ak.stock_individual_basic_info_xq(
+            symbol=stock_code
+        )
+
+        if data is not None and not data.empty:
+            return data
+
+    except Exception:
+        pass
+
+    return None
     data = ak.stock_financial_analysis_indicator(
         symbol=stock_code
     )
