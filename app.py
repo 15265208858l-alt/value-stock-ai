@@ -9,7 +9,7 @@ st.set_page_config(
 )
 
 st.title("📈 ValueStock AI")
-st.subheader("A股真实行情数据系统")
+st.subheader("A股行情 + 财务数据测试版")
 
 st.divider()
 
@@ -27,8 +27,7 @@ def get_market_code(stock_code):
 
 
 def get_history_data(stock_code):
-    """获取腾讯A股历史行情"""
-
+    """获取腾讯历史行情"""
     market_code = get_market_code(stock_code)
 
     history = ak.stock_zh_a_hist_tx(
@@ -44,13 +43,32 @@ def get_history_data(stock_code):
     return history
 
 
+def get_financial_report(stock_code, report_type):
+    """
+    获取新浪财务报表
+    report_type:
+    资产负债表 / 利润表 / 现金流量表
+    """
+    market_code = get_market_code(stock_code)
+
+    data = ak.stock_financial_report_sina(
+        stock=market_code,
+        symbol=report_type
+    )
+
+    if data is None or data.empty:
+        return None
+
+    return data
+
+
 stock_code = st.text_input(
     "请输入A股股票代码",
     placeholder="例如：600089、000333、601899"
 )
 
 
-if st.button("获取真实A股数据", type="primary"):
+if st.button("获取A股行情+财务数据", type="primary"):
 
     if not stock_code:
         st.warning("⚠️ 请先输入股票代码")
@@ -62,131 +80,158 @@ if st.button("获取真实A股数据", type="primary"):
         st.error("❌ 股票代码必须是6位数字，例如：600089")
         st.stop()
 
-    st.info(f"正在获取 {stock_code} 的历史行情，请稍候……")
+    # =========================
+    # 1. 历史行情
+    # =========================
+
+    st.info(f"正在获取 {stock_code} 数据，请稍候……")
+
+    try:
+        history = get_history_data(stock_code)
+
+        if history is not None:
+
+            st.success("✅ A股历史行情获取成功")
+
+            latest = history.iloc[-1]
+
+            latest_data = pd.DataFrame({
+                "指标": [
+                    "股票代码",
+                    "最新交易日",
+                    "最新收盘价",
+                    "开盘价",
+                    "最高价",
+                    "最低价"
+                ],
+                "数据": [
+                    stock_code,
+                    latest["date"],
+                    latest["close"],
+                    latest["open"],
+                    latest["high"],
+                    latest["low"]
+                ]
+            })
+
+            st.subheader("📌 最新交易日行情")
+
+            st.dataframe(
+                latest_data,
+                use_container_width=True,
+                hide_index=True
+            )
+
+        else:
+            st.warning("⚠️ 没有获取到历史行情")
+
+    except Exception as e:
+        st.error("❌ 历史行情获取失败")
+        st.code(str(e))
+
+
+    # =========================
+    # 2. 利润表
+    # =========================
 
     try:
 
-        history = get_history_data(stock_code)
-
-        if history is None:
-            st.error("❌ 没有获取到该股票的历史行情")
-            st.stop()
-
-        # =========================
-        # 最新交易日数据
-        # =========================
-
-        latest = history.iloc[-1]
-
-        st.success("✅ A股历史行情获取成功")
-
-        st.subheader("📌 最新交易日行情")
-
-        latest_data = pd.DataFrame({
-            "指标": [
-                "股票代码",
-                "最新交易日",
-                "最新收盘价",
-                "开盘价",
-                "最高价",
-                "最低价",
-                "成交量"
-            ],
-            "数据": [
-                stock_code,
-                latest["date"],
-                latest["close"],
-                latest["open"],
-                latest["high"],
-                latest["low"],
-                latest["amount"]
-            ]
-        })
-
-        st.dataframe(
-            latest_data,
-            use_container_width=True,
-            hide_index=True
+        profit = get_financial_report(
+            stock_code,
+            "利润表"
         )
 
-        # =========================
-        # 最近30个交易日
-        # =========================
+        if profit is not None:
 
-        st.subheader("📈 最近30个交易日")
+            st.success("✅ 利润表获取成功")
 
-        history_30 = history.tail(30)
+            st.subheader("📑 利润表")
 
-        st.dataframe(
-            history_30,
-            use_container_width=True,
-            hide_index=True
-        )
+            st.dataframe(
+                profit.head(10),
+                use_container_width=True,
+                hide_index=True
+            )
 
-        # =========================
-        # 收盘价走势图
-        # =========================
-
-        st.subheader("📊 收盘价走势")
-
-        chart_data = history.copy()
-
-        chart_data["date"] = pd.to_datetime(
-            chart_data["date"]
-        )
-
-        chart_data = chart_data.set_index("date")
-
-        st.line_chart(
-            chart_data["close"]
-        )
-
-        # =========================
-        # 基础统计
-        # =========================
-
-        st.subheader("📊 基础行情分析")
-
-        latest_close = float(latest["close"])
-
-        recent_close = history_30["close"].astype(float)
-
-        change_30 = (
-            latest_close / float(recent_close.iloc[0]) - 1
-        ) * 100
-
-        high_30 = float(recent_close.max())
-        low_30 = float(recent_close.min())
-
-        col1, col2, col3, col4 = st.columns(4)
-
-        col1.metric(
-            "最新收盘价",
-            f"{latest_close:.2f}"
-        )
-
-        col2.metric(
-            "近30日涨跌",
-            f"{change_30:.2f}%"
-        )
-
-        col3.metric(
-            "近30日最高",
-            f"{high_30:.2f}"
-        )
-
-        col4.metric(
-            "近30日最低",
-            f"{low_30:.2f}"
-        )
-
-        st.info(
-            "当前版本先采用稳定的历史行情数据。"
-            "下一阶段将继续接入财务数据和价值投资分析模型。"
-        )
+        else:
+            st.warning("⚠️ 利润表没有获取到数据")
 
     except Exception as e:
 
-        st.error("❌ A股数据获取失败")
+        st.error("❌ 利润表获取失败")
 
         st.code(str(e))
+
+
+    # =========================
+    # 3. 资产负债表
+    # =========================
+
+    try:
+
+        balance = get_financial_report(
+            stock_code,
+            "资产负债表"
+        )
+
+        if balance is not None:
+
+            st.success("✅ 资产负债表获取成功")
+
+            st.subheader("🏦 资产负债表")
+
+            st.dataframe(
+                balance.head(10),
+                use_container_width=True,
+                hide_index=True
+            )
+
+        else:
+            st.warning("⚠️ 资产负债表没有获取到数据")
+
+    except Exception as e:
+
+        st.error("❌ 资产负债表获取失败")
+
+        st.code(str(e))
+
+
+    # =========================
+    # 4. 现金流量表
+    # =========================
+
+    try:
+
+        cashflow = get_financial_report(
+            stock_code,
+            "现金流量表"
+        )
+
+        if cashflow is not None:
+
+            st.success("✅ 现金流量表获取成功")
+
+            st.subheader("💰 现金流量表")
+
+            st.dataframe(
+                cashflow.head(10),
+                use_container_width=True,
+                hide_index=True
+            )
+
+        else:
+            st.warning("⚠️ 现金流量表没有获取到数据")
+
+    except Exception as e:
+
+        st.error("❌ 现金流量表获取失败")
+
+        st.code(str(e))
+
+
+st.divider()
+
+st.caption(
+    "当前版本用于验证A股行情与财务数据接口。"
+    "后续将自动计算ROE、增长率、现金流质量、负债率等指标。"
+)
