@@ -9,13 +9,14 @@ st.set_page_config(
 )
 
 st.title("📈 ValueStock AI")
-st.subheader("A股行情 + 财务指标分析 V3")
+st.subheader("A股长期价值投资财务分析 V4")
 
 st.divider()
 
 
 def get_market_code(stock_code):
     """根据股票代码判断市场"""
+
     if stock_code.startswith(("6", "68")):
         return "sh" + stock_code
 
@@ -32,17 +33,17 @@ def get_history_data(stock_code):
 
     market_code = get_market_code(stock_code)
 
-    history = ak.stock_zh_a_hist_tx(
+    data = ak.stock_zh_a_hist_tx(
         symbol=market_code,
         start_date="20200101",
         end_date="20500101",
         adjust=""
     )
 
-    if history is None or history.empty:
+    if data is None or data.empty:
         return None
 
-    return history
+    return data
 
 
 def get_financial_report(stock_code, report_type):
@@ -62,38 +63,45 @@ def get_financial_report(stock_code, report_type):
 
 def get_financial_indicators(stock_code):
 
-    """
-    获取新浪财务分析指标
-    """
-
     data = ak.stock_financial_analysis_indicator(
-    symbol=stock_code
-)
+        symbol=stock_code
+    )
+
     if data is None or data.empty:
         return None
 
     return data
 
 
-def safe_number(value):
+def safe_float(value):
 
     try:
 
         if value is None:
             return None
 
-        text = str(value).strip()
+        value = str(value).strip()
 
-        if text in ["", "--", "nan", "None"]:
+        if value in ["", "--", "nan", "None"]:
             return None
 
-        text = text.replace(",", "")
+        value = value.replace(",", "")
 
-        return float(text)
+        return float(value)
 
     except Exception:
 
         return None
+
+
+def find_column(df, candidates):
+
+    for column in candidates:
+
+        if column in df.columns:
+            return column
+
+    return None
 
 
 stock_code = st.text_input(
@@ -103,19 +111,16 @@ stock_code = st.text_input(
 
 
 if st.button(
-    "开始财务分析",
+    "开始深度财务分析",
     type="primary"
 ):
 
     if not stock_code:
 
         st.warning("⚠️ 请先输入股票代码")
-
         st.stop()
 
-
     stock_code = stock_code.strip()
-
 
     if len(stock_code) != 6 or not stock_code.isdigit():
 
@@ -126,20 +131,18 @@ if st.button(
         st.stop()
 
 
-    # ==================================================
-    # 1. 行情
-    # ==================================================
-
     st.info(
         f"正在分析 {stock_code}，请稍候……"
     )
 
 
+    # =====================================================
+    # 1. 行情
+    # =====================================================
+
     try:
 
-        history = get_history_data(
-            stock_code
-        )
+        history = get_history_data(stock_code)
 
         if history is not None:
 
@@ -149,54 +152,33 @@ if st.button(
                 "✅ A股历史行情获取成功"
             )
 
-            st.subheader(
-                "📌 最新行情"
+            col1, col2, col3, col4 = st.columns(4)
+
+            col1.metric(
+                "最新收盘价",
+                f"{float(latest['close']):.2f}"
             )
 
-            latest_data = pd.DataFrame({
-
-                "指标": [
-
-                    "股票代码",
-                    "最新交易日",
-                    "最新收盘价",
-                    "开盘价",
-                    "最高价",
-                    "最低价"
-
-                ],
-
-                "数据": [
-
-                    stock_code,
-                    latest["date"],
-                    latest["close"],
-                    latest["open"],
-                    latest["high"],
-                    latest["low"]
-
-                ]
-
-            })
-
-
-            st.dataframe(
-
-                latest_data,
-
-                use_container_width=True,
-
-                hide_index=True
-
+            col2.metric(
+                "最新交易日",
+                str(latest["date"])
             )
 
+            col3.metric(
+                "最高价",
+                f"{float(latest['high']):.2f}"
+            )
+
+            col4.metric(
+                "最低价",
+                f"{float(latest['low']):.2f}"
+            )
 
         else:
 
             st.warning(
                 "⚠️ 没有获取到历史行情"
             )
-
 
     except Exception as e:
 
@@ -207,9 +189,9 @@ if st.button(
         st.code(str(e))
 
 
-    # ==================================================
+    # =====================================================
     # 2. 财务指标
-    # ==================================================
+    # =====================================================
 
     try:
 
@@ -217,367 +199,455 @@ if st.button(
             stock_code
         )
 
-
         if indicators is None:
 
-            st.warning(
-                "⚠️ 没有获取到财务指标"
+            st.error(
+                "❌ 财务指标获取失败"
             )
 
-        else:
-
-            st.success(
-                "✅ 财务指标获取成功"
-            )
+            st.stop()
 
 
-            st.subheader(
-                "📊 核心财务指标"
-            )
+        st.success(
+            "✅ 财务指标获取成功"
+        )
 
 
-            # 如果日期存在于索引中，转换为普通列
-            indicators_display = indicators.copy()
-
-            if indicators_display.index.name is not None:
-
-                indicators_display = (
-                    indicators_display
-                    .reset_index()
-                )
+        st.subheader(
+            "📊 核心财务指标"
+        )
 
 
-            # 显示最新一期
-            latest_financial = (
-                indicators
-                .iloc[0]
-                .to_frame(
-                    name="最新值"
-                )
-            )
+        latest = indicators.iloc[0]
 
 
-            latest_financial.index.name = "指标"
-
-
-            st.dataframe(
-
-                latest_financial.head(60),
-
-                use_container_width=True
-
-            )
-
-
-            # ==================================================
-            # 重点指标卡片
-            # ==================================================
-
-            st.subheader(
-                "⭐ 核心价值投资指标"
-            )
-
-
-            latest_row = indicators.iloc[0]
-
-
-            def find_value(
-                candidates
-            ):
-
-                for col in candidates:
-
-                    if col in indicators.columns:
-
-                        return safe_number(
-                            latest_row[col]
-                        )
-
-                return None
-
-
-            roe = find_value([
+        roe_col = find_column(
+            indicators,
+            [
                 "加权净资产收益率(%)",
                 "加权净资产收益率",
                 "净资产收益率(%)",
                 "净资产收益率"
-            ])
+            ]
+        )
 
 
-            gross_margin = find_value([
+        gross_col = find_column(
+            indicators,
+            [
                 "销售毛利率(%)",
                 "销售毛利率"
-            ])
+            ]
+        )
 
 
-            net_margin = find_value([
+        net_col = find_column(
+            indicators,
+            [
                 "销售净利率(%)",
                 "销售净利率"
-            ])
+            ]
+        )
 
 
-            revenue_growth = find_value([
+        revenue_col = find_column(
+            indicators,
+            [
                 "主营业务收入增长率(%)",
                 "主营业务收入增长率"
-            ])
+            ]
+        )
 
 
-            profit_growth = find_value([
+        profit_col = find_column(
+            indicators,
+            [
                 "净利润增长率(%)",
                 "净利润增长率"
-            ])
+            ]
+        )
 
 
-            operating_cashflow = find_value([
-                "每股经营性现金流(元)",
-                "每股经营性现金流"
-            ])
-
-
-            debt_ratio = find_value([
+        debt_col = find_column(
+            indicators,
+            [
                 "资产负债率(%)",
                 "资产负债率"
-            ])
+            ]
+        )
 
 
-            col1, col2, col3 = st.columns(3)
+        cash_col = find_column(
+            indicators,
+            [
+                "每股经营性现金流(元)",
+                "每股经营性现金流"
+            ]
+        )
 
 
-            col1.metric(
-                "ROE",
-                "暂无" if roe is None
-                else f"{roe:.2f}%"
+        roe = safe_float(
+            latest[roe_col]
+        ) if roe_col else None
+
+        gross_margin = safe_float(
+            latest[gross_col]
+        ) if gross_col else None
+
+        net_margin = safe_float(
+            latest[net_col]
+        ) if net_col else None
+
+        revenue_growth = safe_float(
+            latest[revenue_col]
+        ) if revenue_col else None
+
+        profit_growth = safe_float(
+            latest[profit_col]
+        ) if profit_col else None
+
+        debt_ratio = safe_float(
+            latest[debt_col]
+        ) if debt_col else None
+
+        operating_cashflow = safe_float(
+            latest[cash_col]
+        ) if cash_col else None
+
+
+        col1, col2, col3 = st.columns(3)
+
+
+        col1.metric(
+            "ROE",
+            "暂无" if roe is None
+            else f"{roe:.2f}%"
+        )
+
+
+        col2.metric(
+            "毛利率",
+            "暂无" if gross_margin is None
+            else f"{gross_margin:.2f}%"
+        )
+
+
+        col3.metric(
+            "净利率",
+            "暂无" if net_margin is None
+            else f"{net_margin:.2f}%"
+        )
+
+
+        col4, col5, col6 = st.columns(3)
+
+
+        col4.metric(
+            "营收增长率",
+            "暂无" if revenue_growth is None
+            else f"{revenue_growth:.2f}%"
+        )
+
+
+        col5.metric(
+            "净利润增长率",
+            "暂无" if profit_growth is None
+            else f"{profit_growth:.2f}%"
+        )
+
+
+        col6.metric(
+            "资产负债率",
+            "暂无" if debt_ratio is None
+            else f"{debt_ratio:.2f}%"
+        )
+
+
+        if operating_cashflow is not None:
+
+            st.metric(
+                "每股经营现金流",
+                f"{operating_cashflow:.2f} 元"
             )
 
 
-            col2.metric(
-                "销售毛利率",
-                "暂无" if gross_margin is None
-                else f"{gross_margin:.2f}%"
-            )
+        # =====================================================
+        # 3. 财务质量判断
+        # =====================================================
+
+        st.divider()
+
+        st.subheader(
+            "🔍 财务质量深度判断"
+        )
 
 
-            col3.metric(
-                "销售净利率",
-                "暂无" if net_margin is None
-                else f"{net_margin:.2f}%"
-            )
+        score = 0
+
+        risk_messages = []
+
+        positive_messages = []
 
 
-            col4, col5, col6 = st.columns(3)
+        # -----------------------------
+        # ROE
+        # -----------------------------
 
+        if roe is not None:
 
-            col4.metric(
-                "营收增长率",
-                "暂无" if revenue_growth is None
-                else f"{revenue_growth:.2f}%"
-            )
+            if roe >= 20:
 
+                score += 25
 
-            col5.metric(
-                "净利润增长率",
-                "暂无" if profit_growth is None
-                else f"{profit_growth:.2f}%"
-            )
+                positive_messages.append(
+                    "✅ ROE达到20%以上，盈利能力较强。"
+                )
 
+            elif roe >= 15:
 
-            col6.metric(
-                "资产负债率",
-                "暂无" if debt_ratio is None
-                else f"{debt_ratio:.2f}%"
-            )
+                score += 20
 
+                positive_messages.append(
+                    "✅ ROE达到15%以上，具备较好的资本回报能力。"
+                )
 
-            st.subheader(
-                "💰 每股经营现金流"
-            )
+            elif roe >= 10:
 
+                score += 12
 
-            if operating_cashflow is not None:
-
-                st.metric(
-                    "每股经营现金流",
-                    f"{operating_cashflow:.2f} 元"
+                risk_messages.append(
+                    "🟡 ROE处于一般水平，需要继续观察。"
                 )
 
             else:
 
-                st.info(
-                    "暂无可用数据"
+                score += 5
+
+                risk_messages.append(
+                    "⚠️ ROE偏低，企业资本使用效率一般。"
                 )
 
 
-            # ==================================================
-            # 3. 财务质量初步判断
-            # ==================================================
+        # -----------------------------
+        # 营收增长
+        # -----------------------------
+
+        if revenue_growth is not None:
+
+            if revenue_growth >= 15:
+
+                score += 20
+
+                positive_messages.append(
+                    "✅ 营收增长较快，业务扩张能力较强。"
+                )
+
+            elif revenue_growth >= 5:
+
+                score += 14
+
+                positive_messages.append(
+                    "🟡 营收保持增长，但速度中等。"
+                )
+
+            elif revenue_growth >= 0:
+
+                score += 8
+
+                risk_messages.append(
+                    "🟡 营收增长较弱。"
+                )
+
+            else:
+
+                score += 3
+
+                risk_messages.append(
+                    "🚨 营收出现负增长。"
+                )
+
+
+        # -----------------------------
+        # 净利润增长
+        # -----------------------------
+
+        if profit_growth is not None:
+
+            if profit_growth >= 20:
+
+                score += 20
+
+                positive_messages.append(
+                    "✅ 净利润增长较快。"
+                )
+
+            elif profit_growth >= 10:
+
+                score += 15
+
+                positive_messages.append(
+                    "✅ 净利润保持较好的增长。"
+                )
+
+            elif profit_growth >= 0:
+
+                score += 8
+
+                risk_messages.append(
+                    "🟡 净利润增长一般。"
+                )
+
+            else:
+
+                score += 3
+
+                risk_messages.append(
+                    "🚨 净利润出现负增长。"
+                )
+
+
+        # -----------------------------
+        # 资产负债率
+        # -----------------------------
+
+        if debt_ratio is not None:
+
+            if debt_ratio < 50:
+
+                score += 20
+
+                positive_messages.append(
+                    "✅ 资产负债率较稳健。"
+                )
+
+            elif debt_ratio < 70:
+
+                score += 12
+
+                risk_messages.append(
+                    "🟡 资产负债率处于需要观察的水平。"
+                )
+
+            else:
+
+                score += 5
+
+                risk_messages.append(
+                    "🚨 资产负债率偏高，偿债风险需要重点关注。"
+                )
+
+
+        # -----------------------------
+        # 经营现金流
+        # -----------------------------
+
+        if operating_cashflow is not None:
+
+            if operating_cashflow > 0:
+
+                score += 15
+
+                positive_messages.append(
+                    "✅ 每股经营现金流为正。"
+                )
+
+            else:
+
+                risk_messages.append(
+                    "🚨 每股经营现金流为负，需要重点排查利润质量。"
+                )
+
+
+        # =====================================================
+        # 4. 综合评分
+        # =====================================================
+
+        st.subheader(
+            "🎯 财务质量评分"
+        )
+
+
+        if score >= 85:
+
+            rating = "优秀"
+
+        elif score >= 70:
+
+            rating = "良好"
+
+        elif score >= 55:
+
+            rating = "一般"
+
+        else:
+
+            rating = "偏弱"
+
+
+        st.metric(
+            "财务质量评分",
+            f"{score} / 100"
+        )
+
+
+        st.write(
+            f"### 综合判断：{rating}"
+        )
+
+
+        # =====================================================
+        # 5. 优势
+        # =====================================================
+
+        if positive_messages:
 
             st.subheader(
-                "🔍 财务质量初步判断"
+                "✅ 当前主要优势"
             )
 
-
-            score = 0
-
-
-            comments = []
-
-
-            # ROE
-            if roe is not None:
-
-                if roe >= 15:
-
-                    score += 20
-
-                    comments.append(
-                        "✅ ROE达到15%以上，盈利能力较强。"
-                    )
-
-                elif roe >= 10:
-
-                    score += 15
-
-                    comments.append(
-                        "🟡 ROE处于中等水平。"
-                    )
-
-                else:
-
-                    score += 8
-
-                    comments.append(
-                        "⚠️ ROE偏低，需要进一步分析盈利能力。"
-                    )
-
-
-            # 营收增长
-            if revenue_growth is not None:
-
-                if revenue_growth >= 10:
-
-                    score += 20
-
-                    comments.append(
-                        "✅ 营收保持较好的增长。"
-                    )
-
-                elif revenue_growth >= 0:
-
-                    score += 12
-
-                    comments.append(
-                        "🟡 营收保持增长，但速度一般。"
-                    )
-
-                else:
-
-                    score += 5
-
-                    comments.append(
-                        "⚠️ 营收出现负增长。"
-                    )
-
-
-            # 净利润增长
-            if profit_growth is not None:
-
-                if profit_growth >= 10:
-
-                    score += 20
-
-                    comments.append(
-                        "✅ 净利润保持较好的增长。"
-                    )
-
-                elif profit_growth >= 0:
-
-                    score += 12
-
-                    comments.append(
-                        "🟡 净利润增长一般。"
-                    )
-
-                else:
-
-                    score += 5
-
-                    comments.append(
-                        "⚠️ 净利润出现负增长。"
-                    )
-
-
-            # 负债率
-            if debt_ratio is not None:
-
-                if debt_ratio < 50:
-
-                    score += 20
-
-                    comments.append(
-                        "✅ 资产负债率相对稳健。"
-                    )
-
-                elif debt_ratio < 70:
-
-                    score += 12
-
-                    comments.append(
-                        "🟡 资产负债率需要持续观察。"
-                    )
-
-                else:
-
-                    score += 5
-
-                    comments.append(
-                        "⚠️ 资产负债率偏高。"
-                    )
-
-
-            # 现金流
-            if operating_cashflow is not None:
-
-                if operating_cashflow > 0:
-
-                    score += 20
-
-                    comments.append(
-                        "✅ 每股经营现金流为正。"
-                    )
-
-                else:
-
-                    comments.append(
-                        "🚨 每股经营现金流为负，需要重点排查。"
-                    )
-
-
-            # ==================================================
-            # 综合评分
-            # ==================================================
-
-            st.subheader(
-                "🎯 财务质量评分"
-            )
-
-
-            st.metric(
-                "综合财务质量分数",
-                f"{score} / 100"
-            )
-
-
-            for comment in comments:
+            for message in positive_messages:
 
                 st.write(
-                    comment
+                    message
                 )
+
+
+        # =====================================================
+        # 6. 风险
+        # =====================================================
+
+        if risk_messages:
+
+            st.subheader(
+                "⚠️ 当前主要风险"
+            )
+
+            for message in risk_messages:
+
+                st.write(
+                    message
+                )
+
+
+        # =====================================================
+        # 7. 原始指标数据
+        # =====================================================
+
+        st.subheader(
+            "📋 财务指标原始数据"
+        )
+
+        st.dataframe(
+            indicators.head(10),
+            use_container_width=True,
+            hide_index=True
+        )
 
 
     except Exception as e:
 
         st.error(
-            "❌ 财务指标获取失败"
+            "❌ 财务分析过程中出现错误"
         )
 
         st.code(
@@ -587,8 +657,7 @@ if st.button(
 
 st.divider()
 
-
 st.caption(
-    "V3版本：行情 + 财务报表 + 核心财务指标。"
-    "后续将增加5年趋势、应收账款、存货、现金流匹配度及价值投资10步分析。"
+    "V4：行情 + 财务指标 + 财务质量初步判断。"
+    "后续将加入5年趋势、现金流/利润匹配、应收账款、存货及价值投资10步分析。"
 )
