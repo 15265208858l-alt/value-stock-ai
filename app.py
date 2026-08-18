@@ -2698,3 +2698,652 @@ st.divider()
 st.caption(
     "V9：PE + PB情景估值。下一阶段将加入行业估值、DCF及综合投资评级。"
 )
+# =====================================================
+# V10：综合投资决策引擎
+# =====================================================
+
+st.divider()
+
+st.header("🏆 V10：ValueStock AI 综合投资评级")
+
+st.caption(
+    "综合财务质量、成长性、现金流、财务安全和估值进行规则化评分。"
+    "尚未量化的行业、护城河和管理层部分不会被虚假打分。"
+)
+
+
+# =====================================================
+# 1. 安全读取前面模块的数据
+# =====================================================
+
+financial_score = globals().get(
+    "financial_quality_score",
+    None
+)
+
+financial_rating = globals().get(
+    "financial_rating",
+    "数据不足"
+)
+
+current_price = globals().get(
+    "valuation_price",
+    None
+)
+
+normal_value_v10 = globals().get(
+    "normal_value",
+    None
+)
+
+entry_price_v10 = globals().get(
+    "entry_price",
+    None
+)
+
+heavy_price_v10 = globals().get(
+    "heavy_position_price",
+    None
+)
+
+high_price_v10 = globals().get(
+    "high_valuation_price",
+    None
+)
+
+roe_v10 = globals().get(
+    "roe",
+    None
+)
+
+revenue_growth_v10 = globals().get(
+    "revenue_growth",
+    None
+)
+
+profit_growth_v10 = globals().get(
+    "profit_growth",
+    None
+)
+
+debt_ratio_v10 = globals().get(
+    "debt_ratio",
+    None
+)
+
+cash_profit_ratio_v10 = globals().get(
+    "cash_profit_ratio",
+    None
+)
+
+risk_score_v10 = globals().get(
+    "risk_score",
+    0
+)
+
+risk_items_v10 = globals().get(
+    "risk_items",
+    []
+)
+
+
+# =====================================================
+# 2. 六大维度评分
+# =====================================================
+
+# 财务质量：30分
+financial_component = 0
+
+if financial_score is not None:
+
+    financial_component = (
+        financial_score
+        * 0.30
+    )
+
+
+# 成长性：20分
+growth_component = 0
+
+if (
+    revenue_growth_v10 is not None
+    and profit_growth_v10 is not None
+):
+
+    growth_avg = (
+        revenue_growth_v10
+        + profit_growth_v10
+    ) / 2
+
+    if growth_avg >= 20:
+
+        growth_component = 20
+
+    elif growth_avg >= 15:
+
+        growth_component = 17
+
+    elif growth_avg >= 10:
+
+        growth_component = 14
+
+    elif growth_avg >= 5:
+
+        growth_component = 10
+
+    elif growth_avg >= 0:
+
+        growth_component = 6
+
+    else:
+
+        growth_component = 2
+
+
+# 盈利能力：15分
+profitability_component = 0
+
+if roe_v10 is not None:
+
+    if roe_v10 >= 20:
+
+        profitability_component = 15
+
+    elif roe_v10 >= 15:
+
+        profitability_component = 13
+
+    elif roe_v10 >= 10:
+
+        profitability_component = 10
+
+    elif roe_v10 >= 5:
+
+        profitability_component = 6
+
+    else:
+
+        profitability_component = 2
+
+
+# 现金流质量：15分
+cash_component = 0
+
+if cash_profit_ratio_v10 is not None:
+
+    if cash_profit_ratio_v10 >= 1.0:
+
+        cash_component = 15
+
+    elif cash_profit_ratio_v10 >= 0.8:
+
+        cash_component = 13
+
+    elif cash_profit_ratio_v10 >= 0.6:
+
+        cash_component = 10
+
+    elif cash_profit_ratio_v10 >= 0.3:
+
+        cash_component = 6
+
+    elif cash_profit_ratio_v10 >= 0:
+
+        cash_component = 3
+
+    else:
+
+        cash_component = 0
+
+
+# 财务安全：10分
+safety_component = 0
+
+if debt_ratio_v10 is not None:
+
+    if debt_ratio_v10 < 40:
+
+        safety_component = 10
+
+    elif debt_ratio_v10 < 50:
+
+        safety_component = 9
+
+    elif debt_ratio_v10 < 60:
+
+        safety_component = 7
+
+    elif debt_ratio_v10 < 70:
+
+        safety_component = 5
+
+    else:
+
+        safety_component = 2
+
+
+# 估值：10分
+valuation_component = 0
+
+valuation_gap = None
+
+if (
+    current_price is not None
+    and normal_value_v10 is not None
+    and normal_value_v10 > 0
+):
+
+    valuation_gap = (
+        normal_value_v10
+        / current_price
+        - 1
+    ) * 100
+
+
+    if valuation_gap >= 30:
+
+        valuation_component = 10
+
+    elif valuation_gap >= 20:
+
+        valuation_component = 9
+
+    elif valuation_gap >= 10:
+
+        valuation_component = 8
+
+    elif valuation_gap >= 0:
+
+        valuation_component = 6
+
+    elif valuation_gap >= -10:
+
+        valuation_component = 4
+
+    elif valuation_gap >= -20:
+
+        valuation_component = 2
+
+    else:
+
+        valuation_component = 0
+
+
+# =====================================================
+# 3. 风险扣分
+# =====================================================
+
+risk_penalty = 0
+
+if risk_score_v10 >= 6:
+
+    risk_penalty = 12
+
+elif risk_score_v10 >= 4:
+
+    risk_penalty = 8
+
+elif risk_score_v10 >= 2:
+
+    risk_penalty = 4
+
+else:
+
+    risk_penalty = 0
+
+
+# =====================================================
+# 4. 综合评分
+# =====================================================
+
+raw_total = (
+    financial_component
+    + growth_component
+    + profitability_component
+    + cash_component
+    + safety_component
+    + valuation_component
+)
+
+final_score = max(
+    0,
+    min(
+        100,
+        round(
+            raw_total - risk_penalty
+        )
+    )
+)
+
+
+# =====================================================
+# 5. 综合评级
+# =====================================================
+
+if final_score >= 85:
+
+    final_rating = "A：优秀长期价值候选"
+
+elif final_score >= 75:
+
+    final_rating = "B：优质，值得长期跟踪"
+
+elif final_score >= 65:
+
+    final_rating = "C：一般，等待更多验证"
+
+elif final_score >= 50:
+
+    final_rating = "D：谨慎，暂不适合重仓"
+
+else:
+
+    final_rating = "E：风险较高"
+
+
+# =====================================================
+# 6. 显示综合评分
+# =====================================================
+
+st.subheader(
+    "🎯 综合评分"
+)
+
+
+score_col1, score_col2 = st.columns(2)
+
+
+score_col1.metric(
+    "ValueStock AI 综合分",
+    f"{final_score} / 100"
+)
+
+
+score_col2.metric(
+    "投资评级",
+    final_rating
+)
+
+
+# =====================================================
+# 7. 分项评分表
+# =====================================================
+
+st.subheader(
+    "📊 综合评分构成"
+)
+
+
+component_table = pd.DataFrame({
+
+    "分析维度": [
+        "财务质量",
+        "成长性",
+        "盈利能力",
+        "现金流质量",
+        "财务安全",
+        "估值"
+    ],
+
+    "满分": [
+        30,
+        20,
+        15,
+        15,
+        10,
+        10
+    ],
+
+    "得分": [
+        round(financial_component, 1),
+        growth_component,
+        profitability_component,
+        cash_component,
+        safety_component,
+        valuation_component
+    ]
+
+})
+
+
+st.dataframe(
+    component_table,
+    use_container_width=True,
+    hide_index=True
+)
+
+
+# =====================================================
+# 8. 当前投资状态
+# =====================================================
+
+st.subheader(
+    "💰 当前投资状态"
+)
+
+
+if current_price is not None:
+
+    st.metric(
+        "当前参考价格",
+        f"{current_price:.2f} 元"
+    )
+
+
+price_table = pd.DataFrame({
+
+    "价格类型": [
+        "重仓参考价",
+        "建仓参考价",
+        "中性合理价",
+        "高估参考价"
+    ],
+
+    "价格": [
+        heavy_price_v10,
+        entry_price_v10,
+        normal_value_v10,
+        high_price_v10
+    ]
+
+})
+
+
+if not price_table.empty:
+
+    price_table["价格"] = (
+        price_table["价格"]
+        .apply(
+            lambda x:
+            "暂无"
+            if x is None
+            else f"{x:.2f}"
+        )
+    )
+
+
+st.dataframe(
+    price_table,
+    use_container_width=True,
+    hide_index=True
+)
+
+
+# =====================================================
+# 9. 当前价格与合理价值
+# =====================================================
+
+st.subheader(
+    "🔍 当前价格判断"
+)
+
+
+if valuation_gap is not None:
+
+    if valuation_gap >= 30:
+
+        st.success(
+            f"🟢 当前价格相对中性估值存在 "
+            f"{valuation_gap:.1f}% 的安全边际。"
+        )
+
+    elif valuation_gap >= 15:
+
+        st.success(
+            f"🟢 当前价格低于中性合理价值约 "
+            f"{valuation_gap:.1f}%。"
+        )
+
+    elif valuation_gap >= 0:
+
+        st.info(
+            f"🟡 当前价格接近合理价值，"
+            f"安全边际约 {valuation_gap:.1f}%。"
+        )
+
+    elif valuation_gap >= -15:
+
+        st.warning(
+            f"🟠 当前价格高于中性估值约 "
+            f"{abs(valuation_gap):.1f}%。"
+        )
+
+    else:
+
+        st.error(
+            f"🔴 当前价格明显高于中性估值，"
+            f"估值风险较大。"
+        )
+
+else:
+
+    st.warning(
+        "⚠️ 暂时无法计算当前价格与合理价值的差距。"
+    )
+
+
+# =====================================================
+# 10. 投资结论
+# =====================================================
+
+st.subheader(
+    "🏆 ValueStock AI 投资结论"
+)
+
+
+if final_score >= 85:
+
+    conclusion = (
+        "公司当前综合质量优秀，财务基础、盈利能力和成长性较强。"
+        "若估值处于合理或低估区域，可进入长期重点研究名单。"
+    )
+
+elif final_score >= 75:
+
+    conclusion = (
+        "公司综合质量较好，具备长期跟踪价值。"
+        "投资重点应放在估值和未来盈利增长的持续性。"
+    )
+
+elif final_score >= 65:
+
+    conclusion = (
+        "公司具备一定投资价值，但多个维度仍需进一步验证。"
+        "建议等待更明确的经营改善或更好的安全边际。"
+    )
+
+elif final_score >= 50:
+
+    conclusion = (
+        "公司存在一定投资风险，当前不宜仅依据短期利润增长进行重仓。"
+    )
+
+else:
+
+    conclusion = (
+        "当前综合质量和风险收益比较弱，暂不建议作为长期核心资产。"
+    )
+
+
+st.info(
+    conclusion
+)
+
+
+# =====================================================
+# 11. 风险清单
+# =====================================================
+
+if risk_items_v10:
+
+    st.subheader(
+        "⚠️ 重点风险"
+    )
+
+    for item in risk_items_v10:
+
+        st.write(
+            f"• {item}"
+        )
+
+
+# =====================================================
+# 12. 数据完整度
+# =====================================================
+
+st.subheader(
+    "📌 模型数据完整度"
+)
+
+
+available_items = 0
+
+total_items = 8
+
+
+if financial_score is not None:
+    available_items += 1
+
+if roe_v10 is not None:
+    available_items += 1
+
+if revenue_growth_v10 is not None:
+    available_items += 1
+
+if profit_growth_v10 is not None:
+    available_items += 1
+
+if debt_ratio_v10 is not None:
+    available_items += 1
+
+if cash_profit_ratio_v10 is not None:
+    available_items += 1
+
+if current_price is not None:
+    available_items += 1
+
+if normal_value_v10 is not None:
+    available_items += 1
+
+
+data_completeness = (
+    available_items
+    / total_items
+    * 100
+)
+
+
+st.progress(
+    data_completeness / 100
+)
+
+st.write(
+    f"当前关键数据完整度："
+    f"{data_completeness:.0f}%"
+)
+
+
+st.caption(
+    "V10目前为规则化投资决策模型。"
+    "行业竞争格局、护城河、管理层、公告事件、同行估值及DCF尚未完全纳入。"
+)
