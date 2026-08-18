@@ -67,9 +67,8 @@ def get_financial_indicators(stock_code):
     """
 
     data = ak.stock_financial_analysis_indicator(
-        stock=stock_code
-    )
-
+    symbol=stock_code
+)
     if data is None or data.empty:
         return None
 
