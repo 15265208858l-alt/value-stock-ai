@@ -1,68 +1,81 @@
 import streamlit as st
+import akshare as ak
+import pandas as pd
 
-# 页面基础设置
 st.set_page_config(
-    page_title="价值股票人工智能",
+    page_title="ValueStock AI",
     page_icon="📈",
     layout="wide"
 )
 
-# 标题
 st.title("📈 ValueStock AI")
-st.subheader("AI驱动的A股价值投资分析系统")
+st.subheader("真实A股数据测试版")
 
 st.divider()
 
-# 输入区域
 stock_code = st.text_input(
-    "请输入股票代码",
-    placeholder="例如：000333、601899、000938"
+    "请输入A股股票代码",
+    placeholder="例如：600089、000333、601899"
 )
 
-# 分析模式
-analysis_mode = st.selectbox(
-    "请选择分析模式",
-    [
-        "长期价值投资10步分析",
-        "快速公司分析",
-        "财务风险排雷",
-        "估值分析"
-    ]
-)
+if st.button("获取A股数据", type="primary"):
 
-# 分析按钮
-if st.button("开始AI分析", type="primary"):
-    
-    if stock_code:
-        st.success(f"正在分析股票：{stock_code}")
-        
-        st.subheader("📊 分析结果")
-        
-        st.write(f"### 股票代码：{stock_code}")
-        st.write(f"### 分析模式：{analysis_mode}")
-        
-        st.info("第一版系统已经成功运行！下一步我们将接入真实A股数据和AI分析能力。")
-        
-        # 10步分析框架
-        if analysis_mode == "长期价值投资10步分析":
-            
-            st.subheader("🔍 长期价值投资10步分析")
-            
-            steps = [
-                "1️⃣ 行业与成长空间",
-                "2️⃣ 企业护城河",
-                "3️⃣ 长期营收与净利润成长",
-                "4️⃣ ROE及盈利能力",
-                "5️⃣ 经营现金流与利润匹配度",
-                "6️⃣ 资产负债表与偿债能力",
-                "7️⃣ 应收账款和存货质量",
-                "8️⃣ 商誉、资本开支及潜在减值",
-                "9️⃣ 管理层、股东结构、关联交易",
-                "🔟 估值与合理买入价"
-            ]
-            
-            for step in steps:
-                st.write(step)
-    
-    else:
-        st.warning("⚠️ 请先输入股票代码！")
+    if not stock_code:
+        st.warning("⚠️ 请先输入股票代码")
+        st.stop()
+
+    stock_code = stock_code.strip()
+
+    try:
+        # 获取股票基本信息
+        info = ak.stock_individual_info_em(
+            symbol=stock_code
+        )
+
+        st.success(f"✅ 成功获取 {stock_code} 的股票数据")
+
+        st.subheader("📌 股票基本信息")
+
+        if isinstance(info, pd.DataFrame):
+
+            info.columns = ["项目", "数值"]
+
+            st.dataframe(
+                info,
+                use_container_width=True,
+                hide_index=True
+            )
+
+        # 获取历史行情
+        st.subheader("📈 最近30个交易日行情")
+
+        hist = ak.stock_zh_a_hist(
+            symbol=stock_code,
+            period="daily",
+            adjust="qfq"
+        )
+
+        if isinstance(hist, pd.DataFrame) and not hist.empty:
+
+            hist = hist.tail(30)
+
+            st.dataframe(
+                hist,
+                use_container_width=True,
+                hide_index=True
+            )
+
+            # 收盘价走势图
+            chart_data = hist.set_index("日期")["收盘"]
+
+            st.line_chart(chart_data)
+
+        else:
+            st.warning("⚠️ 暂时没有获取到历史行情数据")
+
+    except Exception as e:
+
+        st.error("❌ 获取A股数据失败")
+
+        st.write("错误信息：")
+        st.code(str(e))
