@@ -1,7 +1,6 @@
 import streamlit as st
 import akshare as ak
 import pandas as pd
-import numpy as np
 
 st.set_page_config(
     page_title="ValueStock AI",
@@ -17,20 +16,27 @@ st.divider()
 
 
 # =========================================================
-# 基础函数
+# 1. 基础函数
 # =========================================================
 
 def get_market_code(stock_code):
+    """根据股票代码判断市场"""
+
     if stock_code.startswith(("6", "68")):
         return "sh" + stock_code
+
     elif stock_code.startswith(("0", "3")):
         return "sz" + stock_code
+
     elif stock_code.startswith(("4", "8")):
         return "bj" + stock_code
+
     return stock_code
 
 
 def get_history_data(stock_code):
+    """获取腾讯历史行情"""
+
     market_code = get_market_code(stock_code)
 
     data = ak.stock_zh_a_hist_tx(
@@ -46,23 +52,9 @@ def get_history_data(stock_code):
     return data
 
 
-def get_stock_basic_info(stock_code):
-    """
-    获取股票基础信息
-    """
+def get_financial_indicators(stock_code):
+    """获取财务分析指标"""
 
-    try:
-        data = ak.stock_individual_basic_info_xq(
-            symbol=stock_code
-        )
-
-        if data is not None and not data.empty:
-            return data
-
-    except Exception:
-        pass
-
-    return None
     data = ak.stock_financial_analysis_indicator(
         symbol=stock_code
     )
@@ -74,6 +66,8 @@ def get_stock_basic_info(stock_code):
 
 
 def get_financial_report(stock_code, report_type):
+    """获取新浪财务报表"""
+
     market_code = get_market_code(stock_code)
 
     data = ak.stock_financial_report_sina(
@@ -88,7 +82,10 @@ def get_financial_report(stock_code, report_type):
 
 
 def safe_float(value):
+    """安全转换数字"""
+
     try:
+
         if value is None:
             return None
 
@@ -106,39 +103,21 @@ def safe_float(value):
 
 
 def find_column(df, candidates):
+    """寻找可能存在的字段"""
+
+    if df is None:
+        return None
 
     for col in candidates:
+
         if col in df.columns:
             return col
 
     return None
 
 
-def normalize_number_series(series):
-
-    result = []
-
-    for value in series:
-
-        number = safe_float(value)
-
-        result.append(number)
-
-    return result
-
-
-def growth_rate(first, last):
-
-    if first is None or last is None:
-        return None
-
-    if first == 0:
-        return None
-
-    return (last / first - 1) * 100
-
-
 def safe_ratio(a, b):
+    """安全计算比例"""
 
     if a is None or b is None:
         return None
@@ -149,112 +128,8 @@ def safe_ratio(a, b):
     return a / b
 
 
-def classify_growth_gap(
-    revenue_growth,
-    receivable_growth
-):
-
-    if (
-        revenue_growth is None
-        or receivable_growth is None
-    ):
-        return "数据不足"
-
-    gap = receivable_growth - revenue_growth
-
-    if gap >= 20:
-        return "高风险信号"
-
-    elif gap >= 10:
-        return "需要关注"
-
-    elif gap >= 0:
-        return "基本正常"
-
-    else:
-        return "较好"
-
-
-def classify_profit_cash(
-    profit_growth,
-    cash_growth
-):
-
-    if (
-        profit_growth is None
-        or cash_growth is None
-    ):
-        return "数据不足"
-
-    gap = profit_growth - cash_growth
-
-    if gap >= 30:
-        return "高风险信号"
-
-    elif gap >= 15:
-        return "需要关注"
-
-    elif gap >= -10:
-        return "基本匹配"
-
-    else:
-        return "现金流表现更强"
-
-
-def extract_report_years(
-    df,
-    date_candidates
-):
-
-    data = df.copy()
-
-    date_col = find_column(
-        data,
-        date_candidates
-    )
-
-    if date_col is None:
-        return data
-
-    data[date_col] = pd.to_datetime(
-        data[date_col],
-        errors="coerce"
-    )
-
-    data = data.dropna(
-        subset=[date_col]
-    )
-
-    if data.empty:
-        return data
-
-    data["年份"] = (
-        data[date_col]
-        .dt.year
-    )
-
-    return data
-
-
-def select_recent_years(
-    df,
-    max_years=5
-):
-
-    if "年份" not in df.columns:
-        return df
-
-    data = (
-        df.sort_values("年份")
-        .groupby("年份")
-        .tail(1)
-    )
-
-    return data.tail(max_years)
-
-
 # =========================================================
-# 输入
+# 2. 输入股票代码
 # =========================================================
 
 stock_code = st.text_input(
@@ -269,15 +144,21 @@ if st.button(
 ):
 
     if not stock_code:
+
         st.warning("⚠️ 请先输入股票代码")
+
         st.stop()
+
 
     stock_code = stock_code.strip()
 
+
     if len(stock_code) != 6 or not stock_code.isdigit():
+
         st.error(
             "❌ 股票代码必须是6位数字，例如：600089"
         )
+
         st.stop()
 
 
@@ -287,7 +168,7 @@ if st.button(
 
 
     # =====================================================
-    # 1. 历史行情
+    # 3. 获取历史行情
     # =====================================================
 
     try:
@@ -321,6 +202,12 @@ if st.button(
                 f"{float(latest_market['low']):.2f}"
             )
 
+        else:
+
+            st.warning(
+                "⚠️ 没有获取到历史行情"
+            )
+
     except Exception as e:
 
         st.error(
@@ -331,7 +218,7 @@ if st.button(
 
 
     # =====================================================
-    # 2. 获取财务指标
+    # 4. 获取财务指标
     # =====================================================
 
     try:
@@ -341,10 +228,13 @@ if st.button(
         )
 
         if indicators is None:
+
             st.error(
                 "❌ 财务指标获取失败"
             )
+
             st.stop()
+
 
         st.success(
             "✅ 财务指标获取成功"
@@ -353,6 +243,10 @@ if st.button(
 
         latest_indicator = indicators.iloc[0]
 
+
+        # -----------------------------
+        # ROE
+        # -----------------------------
 
         roe_col = find_column(
             indicators,
@@ -365,6 +259,10 @@ if st.button(
         )
 
 
+        # -----------------------------
+        # 营收增长率
+        # -----------------------------
+
         revenue_growth_col = find_column(
             indicators,
             [
@@ -374,6 +272,10 @@ if st.button(
         )
 
 
+        # -----------------------------
+        # 净利润增长率
+        # -----------------------------
+
         profit_growth_col = find_column(
             indicators,
             [
@@ -382,6 +284,10 @@ if st.button(
             ]
         )
 
+
+        # -----------------------------
+        # 资产负债率
+        # -----------------------------
 
         debt_col = find_column(
             indicators,
@@ -434,12 +340,17 @@ if st.button(
         )
 
 
+        # -----------------------------
+        # 显示核心指标
+        # -----------------------------
+
         st.subheader(
             "📊 当前核心指标"
         )
 
 
         a, b, c, d = st.columns(4)
+
 
         a.metric(
             "ROE",
@@ -448,6 +359,7 @@ if st.button(
             else f"{roe:.2f}%"
         )
 
+
         b.metric(
             "营收增长率",
             "暂无"
@@ -455,12 +367,14 @@ if st.button(
             else f"{revenue_growth:.2f}%"
         )
 
+
         c.metric(
             "净利润增长率",
             "暂无"
             if profit_growth is None
             else f"{profit_growth:.2f}%"
         )
+
 
         d.metric(
             "资产负债率",
@@ -476,13 +390,15 @@ if st.button(
             "❌ 财务指标分析失败"
         )
 
-        st.code(str(e))
+        st.code(
+            str(e)
+        )
 
         st.stop()
 
 
     # =====================================================
-    # 3. 三张财务报表
+    # 5. 获取三张财务报表
     # =====================================================
 
     try:
@@ -492,10 +408,12 @@ if st.button(
             "利润表"
         )
 
+
         balance = get_financial_report(
             stock_code,
             "资产负债表"
         )
+
 
         cashflow = get_financial_report(
             stock_code,
@@ -514,17 +432,19 @@ if st.button(
             "❌ 财务报表获取失败"
         )
 
-        st.code(str(e))
+        st.code(
+            str(e)
+        )
 
         st.stop()
 
 
     # =====================================================
-    # 4. 显示报表字段
+    # 6. 原始财务报表
     # =====================================================
 
     with st.expander(
-        "查看原始财务报表"
+        "📋 查看原始财务报表"
     ):
 
         if profit is not None:
@@ -558,7 +478,7 @@ if st.button(
 
 
     # =====================================================
-    # 5. 自动寻找关键财务字段
+    # 7. 查找利润表关键字段
     # =====================================================
 
     st.divider()
@@ -567,10 +487,6 @@ if st.button(
         "🔎 财务排雷核心检查"
     )
 
-
-    # -----------------------------------------------------
-    # 利润表
-    # -----------------------------------------------------
 
     revenue_col = find_column(
         profit,
@@ -591,9 +507,9 @@ if st.button(
     )
 
 
-    # -----------------------------------------------------
-    # 资产负债表
-    # -----------------------------------------------------
+    # =====================================================
+    # 8. 查找资产负债表关键字段
+    # =====================================================
 
     receivable_col = find_column(
         balance,
@@ -612,27 +528,9 @@ if st.button(
     )
 
 
-    total_assets_col = find_column(
-        balance,
-        [
-            "资产总计",
-            "总资产"
-        ]
-    )
-
-
-    total_liability_col = find_column(
-        balance,
-        [
-            "负债合计",
-            "负债总计"
-        ]
-    )
-
-
-    # -----------------------------------------------------
-    # 现金流量表
-    # -----------------------------------------------------
+    # =====================================================
+    # 9. 查找现金流量表关键字段
+    # =====================================================
 
     operating_cash_col = find_column(
         cashflow,
@@ -644,13 +542,17 @@ if st.button(
 
 
     # =====================================================
-    # 6. 最近报告期关键数据
+    # 10. 获取最近一期数据
     # =====================================================
 
     latest_revenue = None
+
     latest_profit = None
+
     latest_receivable = None
+
     latest_inventory = None
+
     latest_cashflow = None
 
 
@@ -688,6 +590,10 @@ if st.button(
             cashflow.iloc[0][operating_cash_col]
         )
 
+
+    # =====================================================
+    # 11. 显示关键数据
+    # =====================================================
 
     st.subheader(
         "💰 最近一期关键数据"
@@ -738,10 +644,8 @@ if st.button(
 
 
     # =====================================================
-    # 7. 利润质量
+    # 12. 利润质量分析
     # =====================================================
-
-    st.divider()
 
     st.subheader(
         "💡 利润质量"
@@ -754,10 +658,8 @@ if st.button(
     )
 
 
-    if (
-        cash_profit_ratio is not None
-        and latest_profit is not None
-    ):
+    if cash_profit_ratio is not None:
+
 
         st.metric(
             "经营现金流 / 净利润",
@@ -771,11 +673,13 @@ if st.button(
                 "✅ 经营现金流能够覆盖净利润，利润现金含量较好。"
             )
 
+
         elif cash_profit_ratio >= 0.7:
 
             st.warning(
                 "🟡 经营现金流与净利润基本匹配，但需要持续观察。"
             )
+
 
         elif cash_profit_ratio >= 0:
 
@@ -783,11 +687,13 @@ if st.button(
                 "⚠️ 经营现金流明显低于净利润，利润质量需要进一步分析。"
             )
 
+
         else:
 
             st.error(
                 "🚨 经营现金流为负，而净利润可能为正，属于重点排雷信号。"
             )
+
 
     else:
 
@@ -797,7 +703,7 @@ if st.button(
 
 
     # =====================================================
-    # 8. 应收账款风险
+    # 13. 应收账款风险
     # =====================================================
 
     st.subheader(
@@ -805,10 +711,14 @@ if st.button(
     )
 
 
+    receivable_ratio = None
+
+
     if (
         latest_receivable is not None
         and latest_revenue is not None
     ):
+
 
         receivable_ratio = (
             latest_receivable
@@ -828,17 +738,20 @@ if st.button(
                 "🚨 应收账款占营业收入比例较高，需要重点检查回款能力。"
             )
 
+
         elif receivable_ratio > 0.25:
 
             st.warning(
                 "🟡 应收账款占比较高，需要结合历史趋势判断。"
             )
 
+
         else:
 
             st.success(
                 "✅ 应收账款/营业收入比例暂未显示明显异常。"
             )
+
 
     else:
 
@@ -848,7 +761,7 @@ if st.button(
 
 
     # =====================================================
-    # 9. 存货风险
+    # 14. 存货风险
     # =====================================================
 
     st.subheader(
@@ -856,10 +769,14 @@ if st.button(
     )
 
 
+    inventory_ratio = None
+
+
     if (
         latest_inventory is not None
         and latest_revenue is not None
     ):
+
 
         inventory_ratio = (
             latest_inventory
@@ -879,17 +796,20 @@ if st.button(
                 "🚨 存货相对营业规模较高，需要检查库存周转和减值风险。"
             )
 
+
         elif inventory_ratio > 0.30:
 
             st.warning(
                 "🟡 存货占比需要继续观察。"
             )
 
+
         else:
 
             st.success(
                 "✅ 存货/营业收入比例暂未显示明显异常。"
             )
+
 
     else:
 
@@ -899,13 +819,13 @@ if st.button(
 
 
     # =====================================================
-    # 10. 综合排雷
+    # 15. 综合财务排雷
     # =====================================================
 
     st.divider()
 
     st.subheader(
-        "🚨 V6财务排雷结论"
+        "🚨 V6 财务排雷结论"
     )
 
 
@@ -973,11 +893,16 @@ if st.button(
         )
 
 
+    # =====================================================
+    # 16. 最终风险评级
+    # =====================================================
+
     if risk_score == 0:
 
         st.success(
             "🟢 当前未发现明显的一级财务风险信号。"
         )
+
 
     elif risk_score <= 2:
 
@@ -985,11 +910,13 @@ if st.button(
             "🟡 当前存在少量需要观察的财务风险。"
         )
 
+
     elif risk_score <= 4:
 
         st.warning(
             "🟠 当前存在多个值得深入研究的风险信号。"
         )
+
 
     else:
 
@@ -1001,8 +928,9 @@ if st.button(
     if risk_items:
 
         st.write(
-            "### 重点关注："
+            "### 重点关注"
         )
+
 
         for item in risk_items:
 
@@ -1012,6 +940,7 @@ if st.button(
 
 
 st.divider()
+
 
 st.caption(
     "V6：利润质量、经营现金流、应收账款、存货及财务风险初步排查。"
