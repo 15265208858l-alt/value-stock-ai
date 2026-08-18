@@ -939,10 +939,403 @@ if st.button(
             )
 
 
+# =====================================================
+# V7：长期价值投资10步分析
+# =====================================================
+
 st.divider()
 
+st.header("🏆 长期价值投资10步分析")
 
 st.caption(
-    "V6：利润质量、经营现金流、应收账款、存货及财务风险初步排查。"
-    "风险提示仅用于研究，不构成投资建议。"
+    "本模块基于当前已获取的财务数据进行规则化分析。"
+    "行业、护城河、管理层和估值等需要后续接入更多数据后进一步完善。"
+)
+
+# -----------------------------------------------------
+# 10步分析结果
+# -----------------------------------------------------
+
+step_results = []
+
+
+# =====================================================
+# ① 行业与成长空间
+# =====================================================
+
+step_results.append({
+    "步骤": "① 行业与成长空间",
+    "结论": "待增强",
+    "说明": "当前版本尚未接入行业规模、行业增速及竞争格局数据。下一阶段加入行业数据库。"
+})
+
+
+# =====================================================
+# ② 企业护城河
+# =====================================================
+
+step_results.append({
+    "步骤": "② 企业护城河",
+    "结论": "待增强",
+    "说明": "需要结合品牌、成本优势、技术壁垒、渠道、客户粘性等非财务数据判断。"
+})
+
+
+# =====================================================
+# ③ 长期营收与净利润成长
+# =====================================================
+
+if revenue_growth is not None and profit_growth is not None:
+
+    if revenue_growth > 10 and profit_growth > 10:
+
+        result = "较好"
+
+        explanation = (
+            f"当前营收增长率 {revenue_growth:.2f}%，"
+            f"净利润增长率 {profit_growth:.2f}%，"
+            "当前增长表现较好。"
+        )
+
+    elif revenue_growth >= 0 and profit_growth >= 0:
+
+        result = "一般"
+
+        explanation = (
+            f"当前营收增长率 {revenue_growth:.2f}%，"
+            f"净利润增长率 {profit_growth:.2f}%，"
+            "公司仍在增长，但速度一般。"
+        )
+
+    else:
+
+        result = "偏弱"
+
+        explanation = (
+            f"当前营收增长率 {revenue_growth:.2f}%，"
+            f"净利润增长率 {profit_growth:.2f}%，"
+            "增长出现压力。"
+        )
+
+else:
+
+    result = "数据不足"
+
+    explanation = "缺少足够的增长数据。"
+
+
+step_results.append({
+    "步骤": "③ 长期营收与净利润成长",
+    "结论": result,
+    "说明": explanation
+})
+
+
+# =====================================================
+# ④ ROE及盈利能力
+# =====================================================
+
+if roe is not None:
+
+    if roe >= 20:
+
+        result = "优秀"
+
+        explanation = (
+            f"ROE {roe:.2f}%，资本回报能力较强。"
+        )
+
+    elif roe >= 15:
+
+        result = "良好"
+
+        explanation = (
+            f"ROE {roe:.2f}%，盈利能力较好。"
+        )
+
+    elif roe >= 10:
+
+        result = "一般"
+
+        explanation = (
+            f"ROE {roe:.2f}%，资本使用效率一般。"
+        )
+
+    else:
+
+        result = "偏弱"
+
+        explanation = (
+            f"ROE {roe:.2f}%，需要重点研究盈利能力。"
+        )
+
+else:
+
+    result = "数据不足"
+
+    explanation = "没有获得可用ROE。"
+
+
+step_results.append({
+    "步骤": "④ ROE及盈利能力",
+    "结论": result,
+    "说明": explanation
+})
+
+
+# =====================================================
+# ⑤ 经营现金流与利润匹配度
+# =====================================================
+
+if cash_profit_ratio is not None:
+
+    if cash_profit_ratio >= 1:
+
+        result = "优秀"
+
+        explanation = (
+            f"经营现金流/净利润 = {cash_profit_ratio:.2f}，"
+            "现金流能够覆盖利润。"
+        )
+
+    elif cash_profit_ratio >= 0.7:
+
+        result = "良好"
+
+        explanation = (
+            f"经营现金流/净利润 = {cash_profit_ratio:.2f}，"
+            "总体可以匹配。"
+        )
+
+    elif cash_profit_ratio >= 0:
+
+        result = "需要关注"
+
+        explanation = (
+            f"经营现金流/净利润 = {cash_profit_ratio:.2f}，"
+            "明显低于1，需要继续排查利润质量。"
+        )
+
+    else:
+
+        result = "高风险信号"
+
+        explanation = (
+            f"经营现金流/净利润 = {cash_profit_ratio:.2f}，"
+            "经营现金流为负，需要重点排查。"
+        )
+
+else:
+
+    result = "数据不足"
+
+    explanation = "缺少净利润或经营现金流数据。"
+
+
+step_results.append({
+    "步骤": "⑤ 经营现金流与利润匹配度",
+    "结论": result,
+    "说明": explanation
+})
+
+
+# =====================================================
+# ⑥ 资产负债表与偿债能力
+# =====================================================
+
+if debt_ratio is not None:
+
+    if debt_ratio < 50:
+
+        result = "优秀"
+
+        explanation = (
+            f"资产负债率 {debt_ratio:.2f}%，"
+            "整体较稳健。"
+        )
+
+    elif debt_ratio < 70:
+
+        result = "良好"
+
+        explanation = (
+            f"资产负债率 {debt_ratio:.2f}%，"
+            "处于需要持续观察的水平。"
+        )
+
+    else:
+
+        result = "偏高"
+
+        explanation = (
+            f"资产负债率 {debt_ratio:.2f}%，"
+            "杠杆水平较高，需要重点关注偿债能力。"
+        )
+
+else:
+
+    result = "数据不足"
+
+    explanation = "没有获得资产负债率。"
+
+
+step_results.append({
+    "步骤": "⑥ 资产负债表与偿债能力",
+    "结论": result,
+    "说明": explanation
+})
+
+
+# =====================================================
+# ⑦ 应收账款和存货质量
+# =====================================================
+
+quality_messages = []
+
+quality_result = "正常"
+
+if receivable_ratio is not None:
+
+    if receivable_ratio > 0.40:
+
+        quality_result = "需要关注"
+
+        quality_messages.append(
+            f"应收账款/营收 = {receivable_ratio:.2%}，占比较高。"
+        )
+
+    else:
+
+        quality_messages.append(
+            f"应收账款/营收 = {receivable_ratio:.2%}。"
+        )
+
+
+if inventory_ratio is not None:
+
+    if inventory_ratio > 0.50:
+
+        quality_result = "需要关注"
+
+        quality_messages.append(
+            f"存货/营收 = {inventory_ratio:.2%}，占比较高。"
+        )
+
+    else:
+
+        quality_messages.append(
+            f"存货/营收 = {inventory_ratio:.2%}。"
+        )
+
+
+if not quality_messages:
+
+    quality_messages.append(
+        "当前缺少应收账款或存货数据。"
+    )
+
+    quality_result = "数据不足"
+
+
+step_results.append({
+    "步骤": "⑦ 应收账款和存货质量",
+    "结论": quality_result,
+    "说明": " ".join(quality_messages)
+})
+
+
+# =====================================================
+# ⑧ 商誉、资本开支及潜在减值
+# =====================================================
+
+step_results.append({
+    "步骤": "⑧ 商誉、资本开支及潜在减值",
+    "结论": "待增强",
+    "说明": "下一版本接入商誉、固定资产、在建工程及资本开支数据后自动判断。"
+})
+
+
+# =====================================================
+# ⑨ 管理层、股东结构、关联交易
+# =====================================================
+
+step_results.append({
+    "步骤": "⑨ 管理层、股东结构、关联交易",
+    "结论": "待增强",
+    "说明": "需要接入股东结构、实际控制人、关联交易及公司公告数据。"
+})
+
+
+# =====================================================
+# ⑩ 估值与合理买入价
+# =====================================================
+
+step_results.append({
+    "步骤": "⑩ 估值与合理买入价",
+    "结论": "待增强",
+    "说明": "下一阶段加入PE、PB、DCF/盈利估值模型后计算合理价、建仓价、重仓价和高估价。"
+})
+
+
+# =====================================================
+# 显示10步分析
+# =====================================================
+
+st.subheader("📋 10步分析结果")
+
+for item in step_results:
+
+    with st.expander(
+        f"{item['步骤']} —— {item['结论']}"
+    ):
+
+        st.write(
+            item["说明"]
+        )
+
+
+# =====================================================
+# 数据支持度评分
+# =====================================================
+
+supported_count = 0
+
+for item in step_results:
+
+    if item["结论"] not in [
+        "待增强",
+        "数据不足"
+    ]:
+
+        supported_count += 1
+
+
+st.subheader("🎯 当前模型完成度")
+
+completion = (
+    supported_count
+    / len(step_results)
+    * 100
+)
+
+
+st.progress(
+    completion / 100
+)
+
+st.write(
+    f"当前自动化完成度：{completion:.0f}%"
+)
+
+st.info(
+    "目前系统已经能够自动完成财务维度分析。"
+    "行业、护城河、管理层和估值模块将在后续版本逐步接入。"
+)
+
+
+st.divider()
+
+st.caption(
+    "V7：正式加入长期价值投资10步分析框架。"
+    "当前版本强调数据真实性，不对尚未接入的数据进行虚假评分。"
 )
