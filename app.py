@@ -3069,3 +3069,787 @@ st.caption(
     "V13说明：历史PE仅用于估值参考。"
     "周期股、利润波动较大的公司不能机械使用历史PE分位。"
 )
+# =====================================================
+# V14：同行业比较
+# =====================================================
+
+st.divider()
+
+st.header("🏭 V14：同行业比较")
+
+st.caption(
+    "请输入2～5只具有可比业务模式的同行公司，"
+    "系统将使用同一财务指标接口进行横向比较。"
+)
+
+
+# =====================================================
+# 1. 输入同行股票
+# =====================================================
+
+peer_input = st.text_input(
+    "请输入同行股票代码（多个代码用英文逗号分隔）",
+    placeholder="例如：000000,600000,601000"
+)
+
+
+compare_button = st.button(
+    "🔍 开始同行比较"
+)
+
+
+if compare_button:
+
+    peer_codes = []
+
+    if peer_input:
+
+        raw_codes = peer_input.split(",")
+
+        for code in raw_codes:
+
+            code = clean_stock_code(code)
+
+            if (
+                code
+                and code != stock_code
+                and code not in peer_codes
+            ):
+
+                peer_codes.append(code)
+
+    if len(peer_codes) < 2:
+
+        st.warning(
+            "⚠️ 至少输入2只同行股票。"
+        )
+
+        st.stop()
+
+    if len(peer_codes) > 5:
+
+        peer_codes = peer_codes[:5]
+
+        st.info(
+            "最多比较5只同行公司，已自动取前5只。"
+        )
+
+
+    # =================================================
+    # 2. 建立比较股票列表
+    # =================================================
+
+    compare_codes = [
+        stock_code
+    ] + peer_codes
+
+
+    company_rows = []
+
+
+    # =================================================
+    # 3. 获取每家公司财务指标
+    # =================================================
+
+    for code in compare_codes:
+
+        try:
+
+            peer_indicator, source = (
+                get_financial_indicators(
+                    code
+                )
+            )
+
+            if (
+                peer_indicator is None
+                or peer_indicator.empty
+            ):
+
+                st.warning(
+                    f"⚠️ {code} 财务数据获取失败，已跳过。"
+                )
+
+                continue
+
+
+            peer_data = (
+                process_financial_indicators(
+                    peer_indicator
+                )
+            )
+
+
+            latest_peer = peer_data[
+                "latest"
+            ]
+
+            annual_peer = peer_data[
+                "annual"
+            ]
+
+
+            # 当前价格
+            peer_market = (
+                get_realtime_market(code)
+            )
+
+
+            peer_price = None
+            peer_name = code
+
+
+            if peer_market:
+
+                peer_name = peer_market.get(
+                    "名称",
+                    code
+                )
+
+                peer_price = safe_float(
+                    peer_market.get(
+                        "最新价"
+                    )
+                )
+
+
+            # 实时行情失败
+            if peer_price is None:
+
+                peer_history = (
+                    get_history_data(
+                        code
+                    )
+                )
+
+                peer_price = (
+                    get_history_latest_price(
+                        peer_history
+                    )
+                )
+
+
+            # 当前PE
+            peer_pe = None
+
+            if (
+                peer_price is not None
+                and annual_peer.get(
+                    "eps"
+                ) is not None
+                and annual_peer.get(
+                    "eps"
+                ) > 0
+            ):
+
+                peer_pe = (
+                    peer_price
+                    / annual_peer["eps"]
+                )
+
+
+            # 当前PB
+            peer_pb = None
+
+            if (
+                peer_price is not None
+                and annual_peer.get(
+                    "bvps"
+                ) is not None
+                and annual_peer.get(
+                    "bvps"
+                ) > 0
+            ):
+
+                peer_pb = (
+                    peer_price
+                    / annual_peer["bvps"]
+                )
+
+
+            company_rows.append({
+
+                "代码": code,
+
+                "名称": peer_name,
+
+                "价格": peer_price,
+
+                "ROE": annual_peer.get(
+                    "roe"
+                ),
+
+                "营收增长": annual_peer.get(
+                    "revenue_growth"
+                ),
+
+                "净利润增长": annual_peer.get(
+                    "profit_growth"
+                ),
+
+                "资产负债率": annual_peer.get(
+                    "debt"
+                ),
+
+                "EPS": annual_peer.get(
+                    "eps"
+                ),
+
+                "BPS": annual_peer.get(
+                    "bvps"
+                ),
+
+                "PE": peer_pe,
+
+                "PB": peer_pb
+
+            })
+
+
+        except Exception as e:
+
+            st.warning(
+                f"⚠️ {code} 分析失败：{e}"
+            )
+
+
+    # =================================================
+    # 4. 横向比较表
+    # =================================================
+
+    if len(company_rows) >= 2:
+
+        compare_df = pd.DataFrame(
+            company_rows
+        )
+
+
+        st.subheader(
+            "📊 同行业核心指标比较"
+        )
+
+
+        show_columns = [
+
+            "代码",
+            "名称",
+            "价格",
+            "ROE",
+            "营收增长",
+            "净利润增长",
+            "资产负债率",
+            "EPS",
+            "BPS",
+            "PE",
+            "PB"
+
+        ]
+
+
+        show_columns = [
+            col
+            for col in show_columns
+            if col in compare_df.columns
+        ]
+
+
+        display_df = compare_df[
+            show_columns
+        ].copy()
+
+
+        for col in [
+            "价格",
+            "ROE",
+            "营收增长",
+            "净利润增长",
+            "资产负债率",
+            "EPS",
+            "BPS",
+            "PE",
+            "PB"
+        ]:
+
+            if col in display_df.columns:
+
+                display_df[col] = (
+                    display_df[col]
+                    .apply(
+                        lambda x:
+                        "暂无"
+                        if pd.isna(x)
+                        else round(float(x), 2)
+                    )
+                )
+
+
+        st.dataframe(
+            display_df,
+            use_container_width=True,
+            hide_index=True
+        )
+
+
+        # =================================================
+        # 5. 行业平均值
+        # =================================================
+
+        st.subheader(
+            "📊 可比公司平均水平"
+        )
+
+
+        numeric_columns = [
+
+            "ROE",
+            "营收增长",
+            "净利润增长",
+            "资产负债率",
+            "PE",
+            "PB"
+
+        ]
+
+
+        numeric_columns = [
+
+            col
+            for col in numeric_columns
+            if col in compare_df.columns
+
+        ]
+
+
+        industry_average = (
+            compare_df[
+                numeric_columns
+            ]
+            .mean(
+                numeric_only=True
+            )
+        )
+
+
+        avg_table = pd.DataFrame({
+
+            "指标":
+                industry_average.index,
+
+            "可比公司平均":
+                industry_average.values
+
+        })
+
+
+        avg_table[
+            "可比公司平均"
+        ] = (
+            avg_table[
+                "可比公司平均"
+            ]
+            .round(2)
+        )
+
+
+        st.dataframe(
+            avg_table,
+            use_container_width=True,
+            hide_index=True
+        )
+
+
+        # =================================================
+        # 6. 当前公司的相对位置
+        # =================================================
+
+        st.subheader(
+            "🎯 当前公司相对同行位置"
+        )
+
+
+        target = compare_df[
+            compare_df["代码"]
+            == stock_code
+        ]
+
+
+        if not target.empty:
+
+            target_row = target.iloc[0]
+
+
+            # -------------------------------
+            # ROE
+            # -------------------------------
+
+            if "ROE" in compare_df.columns:
+
+                roe_avg = compare_df[
+                    "ROE"
+                ].mean()
+
+                target_roe = (
+                    target_row["ROE"]
+                )
+
+                if not pd.isna(
+                    target_roe
+                ):
+
+                    if target_roe > roe_avg:
+
+                        st.success(
+                            f"✅ ROE {target_roe:.2f}% "
+                            f"高于可比公司平均 "
+                            f"{roe_avg:.2f}%。"
+                        )
+
+                    else:
+
+                        st.warning(
+                            f"🟡 ROE {target_roe:.2f}% "
+                            f"低于或接近可比公司平均 "
+                            f"{roe_avg:.2f}%。"
+                        )
+
+
+            # -------------------------------
+            # 营收增长
+            # -------------------------------
+
+            if "营收增长" in compare_df.columns:
+
+                growth_avg = compare_df[
+                    "营收增长"
+                ].mean()
+
+                target_growth = (
+                    target_row["营收增长"]
+                )
+
+                if not pd.isna(
+                    target_growth
+                ):
+
+                    if target_growth > growth_avg:
+
+                        st.success(
+                            f"✅ 营收增长 "
+                            f"{target_growth:.2f}% "
+                            f"高于可比公司平均 "
+                            f"{growth_avg:.2f}%。"
+                        )
+
+                    else:
+
+                        st.warning(
+                            f"🟡 营收增长 "
+                            f"{target_growth:.2f}% "
+                            f"低于或接近可比公司平均 "
+                            f"{growth_avg:.2f}%。"
+                        )
+
+
+            # -------------------------------
+            # PE
+            # -------------------------------
+
+            if "PE" in compare_df.columns:
+
+                pe_avg = compare_df[
+                    "PE"
+                ].mean()
+
+                target_pe = (
+                    target_row["PE"]
+                )
+
+                if (
+                    not pd.isna(target_pe)
+                    and not pd.isna(pe_avg)
+                ):
+
+                    if target_pe < pe_avg:
+
+                        st.success(
+                            f"🟢 当前PE "
+                            f"{target_pe:.2f}倍，"
+                            f"低于可比公司平均 "
+                            f"{pe_avg:.2f}倍。"
+                        )
+
+                    else:
+
+                        st.warning(
+                            f"🟠 当前PE "
+                            f"{target_pe:.2f}倍，"
+                            f"高于可比公司平均 "
+                            f"{pe_avg:.2f}倍。"
+                        )
+
+
+            # -------------------------------
+            # PB
+            # -------------------------------
+
+            if "PB" in compare_df.columns:
+
+                pb_avg = compare_df[
+                    "PB"
+                ].mean()
+
+                target_pb = (
+                    target_row["PB"]
+                )
+
+                if (
+                    not pd.isna(target_pb)
+                    and not pd.isna(pb_avg)
+                ):
+
+                    if target_pb < pb_avg:
+
+                        st.success(
+                            f"🟢 当前PB "
+                            f"{target_pb:.2f}倍，"
+                            f"低于可比公司平均 "
+                            f"{pb_avg:.2f}倍。"
+                        )
+
+                    else:
+
+                        st.warning(
+                            f"🟠 当前PB "
+                            f"{target_pb:.2f}倍，"
+                            f"高于可比公司平均 "
+                            f"{pb_avg:.2f}倍。"
+                        )
+
+
+        # =================================================
+        # 7. 简单同行竞争力评分
+        # =================================================
+
+        st.subheader(
+            "🏆 同行业竞争力评分"
+        )
+
+
+        if not target.empty:
+
+            target_row = target.iloc[0]
+
+            peer_score = 0
+
+
+            # ROE排名
+            if (
+                "ROE" in compare_df.columns
+                and not pd.isna(
+                    target_row["ROE"]
+                )
+            ):
+
+                roe_rank = (
+                    compare_df["ROE"]
+                    .rank(
+                        ascending=False,
+                        method="min"
+                    )
+                )
+
+                target_rank = (
+                    roe_rank.loc[target.name]
+                )
+
+                if target_rank <= 1:
+                    peer_score += 30
+
+                elif target_rank <= 2:
+                    peer_score += 25
+
+                elif target_rank <= 3:
+                    peer_score += 20
+
+                else:
+                    peer_score += 10
+
+
+            # 增长排名
+            if (
+                "营收增长" in compare_df.columns
+                and not pd.isna(
+                    target_row["营收增长"]
+                )
+            ):
+
+                growth_rank = (
+                    compare_df["营收增长"]
+                    .rank(
+                        ascending=False,
+                        method="min"
+                    )
+                )
+
+                target_rank = (
+                    growth_rank.loc[target.name]
+                )
+
+                if target_rank <= 1:
+                    peer_score += 25
+
+                elif target_rank <= 2:
+                    peer_score += 20
+
+                elif target_rank <= 3:
+                    peer_score += 15
+
+                else:
+                    peer_score += 8
+
+
+            # PE排名
+            if (
+                "PE" in compare_df.columns
+                and not pd.isna(
+                    target_row["PE"]
+                )
+            ):
+
+                pe_rank = (
+                    compare_df["PE"]
+                    .rank(
+                        ascending=True,
+                        method="min"
+                    )
+                )
+
+                target_rank = (
+                    pe_rank.loc[target.name]
+                )
+
+                if target_rank <= 1:
+                    peer_score += 25
+
+                elif target_rank <= 2:
+                    peer_score += 20
+
+                elif target_rank <= 3:
+                    peer_score += 15
+
+                else:
+                    peer_score += 8
+
+
+            # 财务安全
+            if (
+                "资产负债率"
+                in compare_df.columns
+                and not pd.isna(
+                    target_row["资产负债率"]
+                )
+            ):
+
+                debt_rank = (
+                    compare_df["资产负债率"]
+                    .rank(
+                        ascending=True,
+                        method="min"
+                    )
+                )
+
+                target_rank = (
+                    debt_rank.loc[target.name]
+                )
+
+                if target_rank <= 1:
+                    peer_score += 20
+
+                elif target_rank <= 2:
+                    peer_score += 16
+
+                elif target_rank <= 3:
+                    peer_score += 12
+
+                else:
+                    peer_score += 6
+
+
+            if peer_score >= 85:
+
+                peer_rating = (
+                    "优秀"
+                )
+
+            elif peer_score >= 70:
+
+                peer_rating = (
+                    "良好"
+                )
+
+            elif peer_score >= 55:
+
+                peer_rating = (
+                    "一般"
+                )
+
+            else:
+
+                peer_rating = (
+                    "偏弱"
+                )
+
+
+            pc1, pc2 = st.columns(2)
+
+
+            pc1.metric(
+                "同行竞争力得分",
+                f"{peer_score}/100"
+            )
+
+
+            pc2.metric(
+                "同行竞争力",
+                peer_rating
+            )
+
+
+            if peer_score >= 85:
+
+                st.success(
+                    "🟢 当前公司在输入的可比公司中整体竞争力较强。"
+                )
+
+            elif peer_score >= 70:
+
+                st.info(
+                    "🟡 当前公司在输入的可比公司中具备较好的综合竞争力。"
+                )
+
+            elif peer_score >= 55:
+
+                st.warning(
+                    "🟠 当前公司在可比公司中处于中等水平。"
+                )
+
+            else:
+
+                st.error(
+                    "🔴 当前公司在输入的可比公司中综合竞争力偏弱。"
+                )
+
+
+    else:
+
+        st.warning(
+            "⚠️ 有效可比公司数量不足，无法进行同行比较。"
+        )
+
+
+st.divider()
+
+st.caption(
+    "V14：人工选择可比公司进行横向比较。"
+    "下一阶段再接入自动行业分类和行业估值分位。"
+)
