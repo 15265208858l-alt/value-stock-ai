@@ -859,14 +859,144 @@ if analyze:
 
 
     # =====================================================
-    # 一、实时行情
-    # =====================================================
+# 一、实时行情
+# =====================================================
 
-    st.header("📌 一、实时行情")
+st.header("📌 一、实时行情")
+
+market_data = get_realtime_market(
+    stock_code
+)
+
+current_price = None
+current_dynamic_pe = None
+current_market_pb = None
 
 
-    market_data = get_realtime_market(
+# -----------------------------------------------------
+# 方案1：实时行情
+# -----------------------------------------------------
+
+if market_data:
+
+    stock_name = market_data.get(
+        "名称",
         stock_code
+    )
+
+    current_price = safe_float(
+        market_data.get("最新价")
+    )
+
+    day_change = safe_float(
+        market_data.get("涨跌幅")
+    )
+
+    current_dynamic_pe = safe_float(
+        market_data.get("市盈率-动态")
+    )
+
+    current_market_pb = safe_float(
+        market_data.get("市净率")
+    )
+
+else:
+
+    stock_name = stock_code
+    day_change = None
+
+
+# -----------------------------------------------------
+# 方案2：实时行情失败时
+# 使用历史行情最新收盘价作为备用价格
+# -----------------------------------------------------
+
+if current_price is None:
+
+    try:
+
+        history_fallback = get_history_data(
+            stock_code
+        )
+
+        if (
+            history_fallback is not None
+            and not history_fallback.empty
+        ):
+
+            # 东方财富历史行情
+            if "收盘" in history_fallback.columns:
+
+                current_price = safe_float(
+                    history_fallback.iloc[-1]["收盘"]
+                )
+
+            # 腾讯历史行情
+            elif "close" in history_fallback.columns:
+
+                current_price = safe_float(
+                    history_fallback.iloc[-1]["close"]
+                )
+
+            if current_price is not None:
+
+                st.warning(
+                    "⚠️ 实时行情接口暂时不可用，"
+                    "当前价格采用最近一个交易日收盘价作为估值参考价。"
+                )
+
+    except Exception:
+
+        pass
+
+
+# -----------------------------------------------------
+# 页面显示
+# -----------------------------------------------------
+
+a1, a2, a3, a4 = st.columns(4)
+
+
+a1.metric(
+    "股票名称",
+    str(stock_name)
+)
+
+
+a2.metric(
+    "当前参考价格",
+    "暂无"
+    if current_price is None
+    else f"{current_price:.2f} 元"
+)
+
+
+a3.metric(
+    "当日涨跌幅",
+    "暂无"
+    if day_change is None
+    else f"{day_change:.2f}%"
+)
+
+
+a4.metric(
+    "实时动态PE",
+    "暂无"
+    if current_dynamic_pe is None
+    else f"{current_dynamic_pe:.2f} 倍"
+)
+
+
+if current_price is not None:
+
+    st.success(
+        "✅ 当前价格获取成功"
+    )
+
+else:
+
+    st.error(
+        "❌ 当前价格暂时无法获取"
     )
 
 
