@@ -25,6 +25,12 @@ from investment_score import (
     calculate_investment_score
 )
 
+from historical_valuation import (
+    build_historical_pe,
+    calculate_historical_statistics,
+    get_historical_valuation_level
+)
+
 
 # =========================================================
 # 0. 页面设置
@@ -37,10 +43,10 @@ st.set_page_config(
 )
 
 st.title("📈 ValueStock AI")
-st.subheader("A股长期价值投资分析系统 V14")
+st.subheader("A股长期价值投资分析系统 V15")
 
 st.caption(
-    "财务质量 + 财务排雷 + 估值 + 同行业竞争力 + 综合投资价值评分"
+    "财务质量 + 财务排雷 + 当前估值 + 同行业比较 + 历史估值"
 )
 
 st.divider()
@@ -931,11 +937,11 @@ if analyze:
 
 
     # =====================================================
-    # 六、估值
+    # 六、当前估值
     # =====================================================
 
     st.header(
-        "💰 六、长期价值估值"
+        "💰 六、当前价值估值"
     )
 
     current_pe = None
@@ -1107,11 +1113,190 @@ if analyze:
 
 
     # =====================================================
-    # 七、同行比较
+    # 七、历史估值 V15
     # =====================================================
 
     st.header(
-        "🏭 七、同行业比较"
+        "📊 七、历史PE估值"
+    )
+
+    historical_pe = (
+        build_historical_pe(
+            history,
+            trend,
+            max_years=10
+        )
+    )
+
+    historical_stats = (
+        calculate_historical_statistics(
+            historical_pe,
+            current_pe
+        )
+    )
+
+    if (
+        historical_pe is not None
+        and not historical_pe.empty
+    ):
+
+        display_history_pe = (
+            historical_pe.copy()
+        )
+
+        display_history_pe[
+            "年末收盘价"
+        ] = (
+            display_history_pe[
+                "年末收盘价"
+            ]
+            .round(2)
+        )
+
+        display_history_pe[
+            "EPS"
+        ] = (
+            display_history_pe[
+                "EPS"
+            ]
+            .round(2)
+        )
+
+        display_history_pe[
+            "PE"
+        ] = (
+            display_history_pe[
+                "PE"
+            ]
+            .round(2)
+        )
+
+        st.subheader(
+            "📅 历史PE序列"
+        )
+
+        st.dataframe(
+            display_history_pe,
+            use_container_width=True,
+            hide_index=True
+        )
+
+
+        h1, h2, h3 = st.columns(3)
+
+        h1.metric(
+            "历史最低PE",
+            "暂无"
+            if historical_stats["min"] is None
+            else f"{historical_stats['min']:.2f}"
+        )
+
+        h2.metric(
+            "历史中位PE",
+            "暂无"
+            if historical_stats["median"] is None
+            else f"{historical_stats['median']:.2f}"
+        )
+
+        h3.metric(
+            "历史最高PE",
+            "暂无"
+            if historical_stats["max"] is None
+            else f"{historical_stats['max']:.2f}"
+        )
+
+
+        h4, h5, h6 = st.columns(3)
+
+        h4.metric(
+            "历史25%分位",
+            "暂无"
+            if historical_stats["q25"] is None
+            else f"{historical_stats['q25']:.2f}"
+        )
+
+        h5.metric(
+            "历史75%分位",
+            "暂无"
+            if historical_stats["q75"] is None
+            else f"{historical_stats['q75']:.2f}"
+        )
+
+        h6.metric(
+            "当前PE历史分位",
+            "暂无"
+            if historical_stats["percentile"] is None
+            else f"{historical_stats['percentile']:.1f}%"
+        )
+
+
+        if historical_stats["deviation"] is not None:
+
+            st.metric(
+                "当前PE相对历史中位PE偏离",
+                f"{historical_stats['deviation']:.2f}%"
+            )
+
+
+        historical_level = (
+            get_historical_valuation_level(
+                historical_stats[
+                    "percentile"
+                ]
+            )
+        )
+
+        st.write(
+            f"**历史估值区域：{historical_level}**"
+        )
+
+
+        if historical_level == "历史低位":
+
+            st.success(
+                "🟢 当前估值处于历史偏低区域。"
+            )
+
+        elif historical_level == "历史中低位":
+
+            st.success(
+                "🟢 当前估值处于历史中低区域。"
+            )
+
+        elif historical_level == "历史中枢":
+
+            st.info(
+                "🟡 当前估值接近历史估值中枢。"
+            )
+
+        elif historical_level == "历史中高位":
+
+            st.warning(
+                "🟠 当前估值处于历史中高区域。"
+            )
+
+        elif historical_level == "历史高位":
+
+            st.error(
+                "🔴 当前估值处于历史高位区域。"
+            )
+
+    else:
+
+        historical_level = "数据不足"
+
+        st.warning(
+            "⚠️ 当前财务和历史价格数据不足，"
+            "暂时无法形成有效的历史PE序列。"
+        )
+
+
+    # =====================================================
+    # 八、同行业比较
+    # =====================================================
+
+    st.header(
+        "🏭 八、同行业比较"
     )
 
     peer_codes = []
@@ -1137,6 +1322,7 @@ if analyze:
                 )
 
     peer_score = None
+
     peer_rating = "数据不足"
 
     if len(peer_codes) < 2:
@@ -1291,12 +1477,14 @@ if analyze:
                 })
 
             except Exception:
+
                 pass
 
             progress.progress(
                 (index + 1)
                 / len(compare_codes)
             )
+
 
         if len(peer_rows) < 2:
 
@@ -1349,10 +1537,6 @@ if analyze:
                 hide_index=True
             )
 
-            st.subheader(
-                "📊 同行平均水平"
-            )
-
             summary = (
                 build_peer_summary(
                     peer_df
@@ -1364,15 +1548,15 @@ if analyze:
                 and not summary.empty
             ):
 
+                st.subheader(
+                    "📊 同行平均"
+                )
+
                 st.dataframe(
                     summary,
                     use_container_width=True,
                     hide_index=True
                 )
-
-            st.subheader(
-                "🎯 目标公司相对同行"
-            )
 
             comparison = (
                 compare_target_with_average(
@@ -1383,12 +1567,14 @@ if analyze:
 
             if comparison:
 
-                comparison_df = pd.DataFrame(
-                    comparison
+                st.subheader(
+                    "🎯 目标公司相对同行"
                 )
 
                 st.dataframe(
-                    comparison_df,
+                    pd.DataFrame(
+                        comparison
+                    ),
                     use_container_width=True,
                     hide_index=True
                 )
@@ -1426,11 +1612,11 @@ if analyze:
 
 
     # =====================================================
-    # 八、综合投资价值评分
+    # 九、综合投资价值评分
     # =====================================================
 
     st.header(
-        "🏆 八、综合投资价值评分"
+        "🏆 九、综合投资价值评分"
     )
 
     valuation_gap = None
@@ -1446,6 +1632,7 @@ if analyze:
             / current_price
             - 1
         ) * 100
+
 
     investment_result = (
         calculate_investment_score(
@@ -1464,6 +1651,7 @@ if analyze:
         )
     )
 
+
     investment_score = (
         investment_result[
             "score"
@@ -1476,12 +1664,15 @@ if analyze:
         ]
     )
 
+
     s1, s2 = st.columns(2)
+
 
     s1.metric(
         "投资价值评分",
         f"{investment_score}/100"
     )
+
 
     s2.metric(
         "投资评级",
@@ -1489,57 +1680,14 @@ if analyze:
     )
 
 
-    # -----------------------------------------------------
-    # 分项得分
-    # -----------------------------------------------------
-
-    score_table = pd.DataFrame({
-
-        "分析维度": [
-
-            "财务质量",
-
-            "同行竞争力",
-
-            "当前估值",
-
-            "风险控制"
-
-        ],
-
-        "得分": [
-
-            f"{investment_result['financial_component']:.1f}/30",
-
-            f"{investment_result['peer_component']:.1f}/25",
-
-            f"{investment_result['valuation_component']}/20",
-
-            f"{investment_result['risk_component']}/10"
-
-        ]
-    })
-
-    st.dataframe(
-        score_table,
-        use_container_width=True,
-        hide_index=True
-    )
-
-
-    st.write(
-        "当前估值判断："
-        f"**{investment_result['valuation_level']}**"
-    )
-
-
     # =====================================================
-    # 九、价格区间
+    # 十、投资价格
     # =====================================================
 
     st.header(
-        "💰 九、投资价格区间"
+        "💰 十、投资价格区间"
     )
+
 
     price_table = pd.DataFrame({
 
@@ -1554,7 +1702,6 @@ if analyze:
             "中性合理价",
 
             "乐观估值"
-
         ],
 
         "价格": [
@@ -1591,11 +1738,11 @@ if analyze:
 
 
     # =====================================================
-    # 十、最终投资结论
+    # 十一、最终投资结论
     # =====================================================
 
     st.header(
-        "🏆 十、最终投资结论"
+        "🏆 十一、最终投资结论"
     )
 
 
@@ -1609,8 +1756,8 @@ if analyze:
     elif investment_score >= 75:
 
         conclusion = (
-            "🟢 公司质量较好，当前估值总体合理，"
-            "值得长期跟踪。"
+            "🟢 公司质量较好，"
+            "当前估值总体合理，值得长期跟踪。"
         )
 
     elif investment_score >= 65:
@@ -1639,10 +1786,6 @@ if analyze:
         conclusion
     )
 
-
-    # =====================================================
-    # 十一、核心风险
-    # =====================================================
 
     if risk_result[
         "risk_items"
@@ -1694,7 +1837,9 @@ if analyze:
 
             "peer_compare.py",
 
-            "investment_score.py"
+            "investment_score.py",
+
+            "historical_valuation.py"
         ],
 
         "状态": [
@@ -1729,6 +1874,8 @@ if analyze:
             if peer_score is not None
             else "⏳",
 
+            "✅",
+
             "✅"
         ]
     })
@@ -1745,6 +1892,7 @@ st.divider()
 
 
 st.caption(
-    "ValueStock AI V14："
-    "财务质量 + 财务风险 + 估值 + 同行业竞争力 + 投资价值评分。"
+    "ValueStock AI V15："
+    "财务质量 + 财务风险 + 当前估值 + "
+    "历史估值 + 同行业竞争力 + 综合投资价值。"
 )
