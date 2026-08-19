@@ -15,10 +15,10 @@ st.set_page_config(
 )
 
 st.title("📈 ValueStock AI")
-st.subheader("A股长期价值投资分析系统 V12.1")
+st.subheader("A股长期价值投资分析系统 V12.2")
 st.caption(
-    "稳定数据链路版：实时价格 + 财务指标 + 三大报表 + "
-    "5年质量 + 财务排雷 + 年度估值 + 投资价格区间"
+    "稳定数据链路版：行情 + 财务指标 + 三大报表 + "
+    "5年质量 + 财务排雷 + PE/PB估值 + 投资价格区间"
 )
 
 st.divider()
@@ -29,9 +29,9 @@ st.divider()
 # =========================================================
 
 def safe_float(value):
+    """安全转换数字"""
 
     try:
-
         if value is None:
             return None
 
@@ -57,11 +57,11 @@ def safe_float(value):
         return float(text)
 
     except Exception:
-
         return None
 
 
 def clean_stock_code(code):
+    """检查股票代码"""
 
     if code is None:
         return ""
@@ -78,6 +78,7 @@ def clean_stock_code(code):
 
 
 def get_market_code(stock_code):
+    """上海/深圳/北京市场代码"""
 
     if stock_code.startswith(("6", "68")):
         return "sh" + stock_code
@@ -92,6 +93,7 @@ def get_market_code(stock_code):
 
 
 def get_symbol_code(stock_code):
+    """AKShare部分接口使用的市场代码"""
 
     if stock_code.startswith(("6", "68")):
         return "SH" + stock_code
@@ -106,15 +108,12 @@ def get_symbol_code(stock_code):
 
 
 def find_column(df, candidates):
+    """从DataFrame中寻找字段"""
 
-    if df is None:
-        return None
-
-    if df.empty:
+    if df is None or df.empty:
         return None
 
     for col in candidates:
-
         if col in df.columns:
             return col
 
@@ -122,6 +121,7 @@ def find_column(df, candidates):
 
 
 def safe_ratio(a, b):
+    """安全计算比例"""
 
     if a is None or b is None:
         return None
@@ -132,7 +132,23 @@ def safe_ratio(a, b):
     return a / b
 
 
+def format_money(value):
+    """金额转亿元显示"""
+
+    if value is None:
+        return "暂无"
+
+    try:
+        return f"{value / 1e8:.2f} 亿元"
+    except Exception:
+        return "暂无"
+
+
 def parse_date_column(df):
+    """寻找并解析日期字段"""
+
+    if df is None or df.empty:
+        return df, None
 
     date_col = find_column(
         df,
@@ -146,7 +162,7 @@ def parse_date_column(df):
     )
 
     if date_col is None:
-        return df, None
+        return df.copy(), None
 
     result = df.copy()
 
@@ -155,9 +171,15 @@ def parse_date_column(df):
         errors="coerce"
     )
 
+    result = result.dropna(
+        subset=["_分析日期"]
+    )
+
+    if result.empty:
+        return df.copy(), date_col
+
     result = (
         result
-        .dropna(subset=["_分析日期"])
         .sort_values(
             "_分析日期",
             ascending=False
@@ -166,17 +188,6 @@ def parse_date_column(df):
     )
 
     return result, date_col
-
-
-def format_money(value):
-
-    if value is None:
-        return "暂无"
-
-    try:
-        return f"{value / 1e8:.2f} 亿元"
-    except Exception:
-        return "暂无"
 
 
 # =========================================================
@@ -202,7 +213,8 @@ def get_realtime_market(stock_code):
             return None
 
         result = df[
-            df[code_col].astype(str) == stock_code
+            df[code_col].astype(str)
+            == stock_code
         ]
 
         if result.empty:
@@ -222,6 +234,7 @@ def get_realtime_market(stock_code):
 @st.cache_data(ttl=300)
 def get_history_data(stock_code):
 
+    # 第一数据源
     try:
 
         data = ak.stock_zh_a_hist(
@@ -238,7 +251,7 @@ def get_history_data(stock_code):
     except Exception:
         pass
 
-
+    # 备用：腾讯
     try:
 
         data = ak.stock_zh_a_hist_tx(
@@ -254,6 +267,25 @@ def get_history_data(stock_code):
     except Exception:
         pass
 
+    return None
+
+
+def get_history_latest_price(history):
+
+    if history is None or history.empty:
+        return None
+
+    # 东方财富格式
+    if "收盘" in history.columns:
+        return safe_float(
+            history.iloc[-1]["收盘"]
+        )
+
+    # 腾讯格式
+    if "close" in history.columns:
+        return safe_float(
+            history.iloc[-1]["close"]
+        )
 
     return None
 
@@ -265,12 +297,12 @@ def get_history_data(stock_code):
 @st.cache_data(ttl=3600)
 def get_financial_indicators(stock_code):
 
-    # 方案1：你之前已经使用过的接口
     symbols = [
         stock_code,
         get_symbol_code(stock_code)
     ]
 
+    # 已验证接口
     for symbol in symbols:
 
         try:
@@ -280,14 +312,12 @@ def get_financial_indicators(stock_code):
             )
 
             if data is not None and not data.empty:
-
                 return data, "stock_financial_analysis_indicator"
 
         except Exception:
             pass
 
-
-    # 方案2：如果当前AkShare支持EM版本
+    # 备用接口
     try:
 
         data = ak.stock_financial_analysis_indicator_em(
@@ -296,19 +326,16 @@ def get_financial_indicators(stock_code):
         )
 
         if data is not None and not data.empty:
-
             return data, "stock_financial_analysis_indicator_em"
 
     except Exception:
         pass
-
 
     return None, None
 
 
 # =========================================================
 # 5. 三张财务报表
-#    保留你原来已经使用成功的新浪接口
 # =========================================================
 
 @st.cache_data(ttl=3600)
@@ -317,7 +344,9 @@ def get_financial_report(
     report_type
 ):
 
-    market_code = get_market_code(stock_code)
+    market_code = get_market_code(
+        stock_code
+    )
 
     try:
 
@@ -332,19 +361,18 @@ def get_financial_report(
     except Exception:
         pass
 
-
     return None
 
 
 # =========================================================
-# 6. 从财务指标中提取字段
+# 6. 财务指标字段
 # =========================================================
 
-def extract_indicator_columns(df):
+def get_indicator_columns(df):
 
-    result = {
+    return {
 
-        "roe_col": find_column(
+        "roe": find_column(
             df,
             [
                 "加权净资产收益率(%)",
@@ -357,7 +385,7 @@ def extract_indicator_columns(df):
             ]
         ),
 
-        "revenue_growth_col": find_column(
+        "revenue_growth": find_column(
             df,
             [
                 "主营业务收入增长率(%)",
@@ -368,7 +396,7 @@ def extract_indicator_columns(df):
             ]
         ),
 
-        "profit_growth_col": find_column(
+        "profit_growth": find_column(
             df,
             [
                 "净利润增长率(%)",
@@ -378,7 +406,7 @@ def extract_indicator_columns(df):
             ]
         ),
 
-        "debt_col": find_column(
+        "debt": find_column(
             df,
             [
                 "资产负债率(%)",
@@ -387,7 +415,7 @@ def extract_indicator_columns(df):
             ]
         ),
 
-        "eps_col": find_column(
+        "eps": find_column(
             df,
             [
                 "摊薄每股收益(元)",
@@ -400,7 +428,7 @@ def extract_indicator_columns(df):
             ]
         ),
 
-        "bvps_col": find_column(
+        "bvps": find_column(
             df,
             [
                 "每股净资产(元)",
@@ -410,125 +438,90 @@ def extract_indicator_columns(df):
                 "BPS"
             ]
         )
-
     }
 
-    return result
-
 
 # =========================================================
-# 7. 最新一期 + 最近完整年度
+# 7. 财务指标处理
 # =========================================================
 
-def extract_current_and_annual(
+def process_financial_indicators(
     indicators
 ):
 
-    output = {
+    result = {
 
-        "latest": {
-            "roe": None,
-            "revenue_growth": None,
-            "profit_growth": None,
-            "debt_ratio": None,
-            "eps": None,
-            "bvps": None,
-            "period": None
-        },
-
-        "annual": {
-            "roe": None,
-            "revenue_growth": None,
-            "profit_growth": None,
-            "debt_ratio": None,
-            "eps": None,
-            "bvps": None,
-            "period": None
-        },
-
+        "latest": {},
+        "annual": {},
         "trend": pd.DataFrame()
-
     }
 
-
     if indicators is None or indicators.empty:
-        return output
-
+        return result
 
     df, date_col = parse_date_column(
         indicators
     )
 
-
     if df is None or df.empty:
-        return output
+        return result
 
+    cols = get_indicator_columns(df)
 
-    columns = extract_indicator_columns(
-        df
-    )
-
-
-    # =====================================================
-    # 最新一期
-    # =====================================================
-
+    # 最新报告期
     latest = df.iloc[0]
 
+    result["latest"] = {
 
-    output["latest"] = {
+        "roe": (
+            safe_float(latest[cols["roe"]])
+            if cols["roe"]
+            else None
+        ),
 
-        "roe": safe_float(
-            latest[columns["roe_col"]]
-        )
-        if columns["roe_col"]
-        else None,
+        "revenue_growth": (
+            safe_float(
+                latest[cols["revenue_growth"]]
+            )
+            if cols["revenue_growth"]
+            else None
+        ),
 
-        "revenue_growth": safe_float(
-            latest[columns["revenue_growth_col"]]
-        )
-        if columns["revenue_growth_col"]
-        else None,
+        "profit_growth": (
+            safe_float(
+                latest[cols["profit_growth"]]
+            )
+            if cols["profit_growth"]
+            else None
+        ),
 
-        "profit_growth": safe_float(
-            latest[columns["profit_growth_col"]]
-        )
-        if columns["profit_growth_col"]
-        else None,
+        "debt": (
+            safe_float(latest[cols["debt"]])
+            if cols["debt"]
+            else None
+        ),
 
-        "debt_ratio": safe_float(
-            latest[columns["debt_col"]]
-        )
-        if columns["debt_col"]
-        else None,
+        "eps": (
+            safe_float(latest[cols["eps"]])
+            if cols["eps"]
+            else None
+        ),
 
-        "eps": safe_float(
-            latest[columns["eps_col"]]
-        )
-        if columns["eps_col"]
-        else None,
-
-        "bvps": safe_float(
-            latest[columns["bvps_col"]]
-        )
-        if columns["bvps_col"]
-        else None,
+        "bvps": (
+            safe_float(latest[cols["bvps"]])
+            if cols["bvps"]
+            else None
+        ),
 
         "period": (
             str(latest[date_col])
             if date_col
-            else None
+            else "最新报告期"
         )
-
     }
 
-
-    # =====================================================
-    # 最近完整年度
-    # =====================================================
-
+    # 年度数据
     annual_df = pd.DataFrame()
-
 
     if "_分析日期" in df.columns:
 
@@ -536,27 +529,22 @@ def extract_current_and_annual(
             df["_分析日期"].dt.month == 12
         ].copy()
 
-
-    # 某些版本日期可能只是年份/文本
     if annual_df.empty and date_col:
 
-        text_series = (
-            df[date_col]
-            .astype(str)
-        )
+        text = df[date_col].astype(str)
 
         mask = (
-            text_series.str.contains(
+            text.str.contains(
                 "12-31",
                 na=False
             )
             |
-            text_series.str.contains(
+            text.str.contains(
                 "12/31",
                 na=False
             )
             |
-            text_series.str.contains(
+            text.str.contains(
                 "12月31",
                 na=False
             )
@@ -564,71 +552,71 @@ def extract_current_and_annual(
 
         annual_df = df[mask].copy()
 
-
-    # 找不到年度时：
-    # 保留最新作为兜底，但在页面明确标注
     if annual_df.empty:
 
         annual = latest
 
     else:
 
-        annual = annual_df.iloc[0]
-
-
-    output["annual"] = {
-
-        "roe": safe_float(
-            annual[columns["roe_col"]]
+        annual = (
+            annual_df
+            .sort_values(
+                "_分析日期"
+            )
+            .iloc[-1]
         )
-        if columns["roe_col"]
-        else None,
 
-        "revenue_growth": safe_float(
-            annual[columns["revenue_growth_col"]]
-        )
-        if columns["revenue_growth_col"]
-        else None,
+    result["annual"] = {
 
-        "profit_growth": safe_float(
-            annual[columns["profit_growth_col"]]
-        )
-        if columns["profit_growth_col"]
-        else None,
+        "roe": (
+            safe_float(annual[cols["roe"]])
+            if cols["roe"]
+            else None
+        ),
 
-        "debt_ratio": safe_float(
-            annual[columns["debt_col"]]
-        )
-        if columns["debt_col"]
-        else None,
+        "revenue_growth": (
+            safe_float(
+                annual[cols["revenue_growth"]]
+            )
+            if cols["revenue_growth"]
+            else None
+        ),
 
-        "eps": safe_float(
-            annual[columns["eps_col"]]
-        )
-        if columns["eps_col"]
-        else None,
+        "profit_growth": (
+            safe_float(
+                annual[cols["profit_growth"]]
+            )
+            if cols["profit_growth"]
+            else None
+        ),
 
-        "bvps": safe_float(
-            annual[columns["bvps_col"]]
-        )
-        if columns["bvps_col"]
-        else None,
+        "debt": (
+            safe_float(annual[cols["debt"]])
+            if cols["debt"]
+            else None
+        ),
+
+        "eps": (
+            safe_float(annual[cols["eps"]])
+            if cols["eps"]
+            else None
+        ),
+
+        "bvps": (
+            safe_float(annual[cols["bvps"]])
+            if cols["bvps"]
+            else None
+        ),
 
         "period": (
             str(annual[date_col])
             if date_col
-            else None
+            else "年度数据"
         )
-
     }
 
-
-    # =====================================================
     # 5年趋势
-    # =====================================================
-
     trend = df.copy()
-
 
     if "_分析日期" in trend.columns:
 
@@ -639,7 +627,6 @@ def extract_current_and_annual(
         annual_trend = trend[
             trend["_分析日期"].dt.month == 12
         ].copy()
-
 
         if not annual_trend.empty:
 
@@ -659,50 +646,39 @@ def extract_current_and_annual(
                 .tail(5)
             )
 
-
     rename_map = {}
-
 
     if date_col:
         rename_map[date_col] = "报告期"
 
+    if cols["roe"]:
+        rename_map[cols["roe"]] = "ROE"
 
-    if columns["roe_col"]:
+    if cols["revenue_growth"]:
         rename_map[
-            columns["roe_col"]
-        ] = "ROE"
-
-
-    if columns["revenue_growth_col"]:
-        rename_map[
-            columns["revenue_growth_col"]
+            cols["revenue_growth"]
         ] = "营收增长率"
 
-
-    if columns["profit_growth_col"]:
+    if cols["profit_growth"]:
         rename_map[
-            columns["profit_growth_col"]
+            cols["profit_growth"]
         ] = "净利润增长率"
 
-
-    if columns["debt_col"]:
+    if cols["debt"]:
         rename_map[
-            columns["debt_col"]
+            cols["debt"]
         ] = "资产负债率"
 
-
-    if columns["eps_col"]:
+    if cols["eps"]:
         rename_map[
-            columns["eps_col"]
+            cols["eps"]
         ] = "EPS"
-
 
     trend = trend.rename(
         columns=rename_map
     )
 
-
-    display_cols = []
+    display_columns = []
 
     for col in [
         "报告期",
@@ -714,21 +690,19 @@ def extract_current_and_annual(
     ]:
 
         if col in trend.columns:
-            display_cols.append(col)
+            display_columns.append(col)
 
+    if display_columns:
 
-    if display_cols:
-
-        output["trend"] = trend[
-            display_cols
+        result["trend"] = trend[
+            display_columns
         ].copy()
 
-
-    return output
+    return result
 
 
 # =========================================================
-# 8. 三大报表数据提取
+# 8. 三张报表关键字段
 # =========================================================
 
 def get_latest_report_value(
@@ -739,32 +713,27 @@ def get_latest_report_value(
     if df is None or df.empty:
         return None
 
-
-    temp, date_col = parse_date_column(
+    temp, _ = parse_date_column(
         df
     )
 
-
     if temp is None or temp.empty:
         return None
-
 
     col = find_column(
         temp,
         candidates
     )
 
-
     if col is None:
         return None
-
 
     return safe_float(
         temp.iloc[0][col]
     )
 
 
-def extract_report_metrics(
+def get_report_metrics(
     profit,
     balance,
     cashflow
@@ -813,19 +782,17 @@ def extract_report_metrics(
                 "经营活动现金流量净额"
             ]
         )
-
     }
 
 
 # =========================================================
-# 9. 输入股票
+# 9. 主界面输入
 # =========================================================
 
 stock_input = st.text_input(
     "请输入A股股票代码",
-    placeholder="例如：000333、600519、601899"
+    placeholder="例如：000333、600089、601899"
 )
-
 
 analyze = st.button(
     "🚀 开始价值投资分析",
@@ -834,7 +801,7 @@ analyze = st.button(
 
 
 # =========================================================
-# 10. 运行
+# 10. 开始分析
 # =========================================================
 
 if analyze:
@@ -842,7 +809,6 @@ if analyze:
     stock_code = clean_stock_code(
         stock_input
     )
-
 
     if not stock_code:
 
@@ -852,158 +818,25 @@ if analyze:
 
         st.stop()
 
-
     st.info(
         f"正在分析 {stock_code}，请稍候……"
     )
 
-
     # =====================================================
-# 一、实时行情
-# =====================================================
+    # 一、实时行情
+    # =====================================================
 
-st.header("📌 一、实时行情")
+    st.header("📌 一、实时行情")
 
-market_data = get_realtime_market(
-    stock_code
-)
-
-current_price = None
-current_dynamic_pe = None
-current_market_pb = None
-
-
-# -----------------------------------------------------
-# 方案1：实时行情
-# -----------------------------------------------------
-
-if market_data:
-
-    stock_name = market_data.get(
-        "名称",
+    market_data = get_realtime_market(
         stock_code
     )
 
-    current_price = safe_float(
-        market_data.get("最新价")
-    )
-
-    day_change = safe_float(
-        market_data.get("涨跌幅")
-    )
-
-    current_dynamic_pe = safe_float(
-        market_data.get("市盈率-动态")
-    )
-
-    current_market_pb = safe_float(
-        market_data.get("市净率")
-    )
-
-else:
-
     stock_name = stock_code
-    day_change = None
-
-
-# -----------------------------------------------------
-# 方案2：实时行情失败时
-# 使用历史行情最新收盘价作为备用价格
-# -----------------------------------------------------
-
-if current_price is None:
-
-    try:
-
-        history_fallback = get_history_data(
-            stock_code
-        )
-
-        if (
-            history_fallback is not None
-            and not history_fallback.empty
-        ):
-
-            # 东方财富历史行情
-            if "收盘" in history_fallback.columns:
-
-                current_price = safe_float(
-                    history_fallback.iloc[-1]["收盘"]
-                )
-
-            # 腾讯历史行情
-            elif "close" in history_fallback.columns:
-
-                current_price = safe_float(
-                    history_fallback.iloc[-1]["close"]
-                )
-
-            if current_price is not None:
-
-                st.warning(
-                    "⚠️ 实时行情接口暂时不可用，"
-                    "当前价格采用最近一个交易日收盘价作为估值参考价。"
-                )
-
-    except Exception:
-
-        pass
-
-
-# -----------------------------------------------------
-# 页面显示
-# -----------------------------------------------------
-
-a1, a2, a3, a4 = st.columns(4)
-
-
-a1.metric(
-    "股票名称",
-    str(stock_name)
-)
-
-
-a2.metric(
-    "当前参考价格",
-    "暂无"
-    if current_price is None
-    else f"{current_price:.2f} 元"
-)
-
-
-a3.metric(
-    "当日涨跌幅",
-    "暂无"
-    if day_change is None
-    else f"{day_change:.2f}%"
-)
-
-
-a4.metric(
-    "实时动态PE",
-    "暂无"
-    if current_dynamic_pe is None
-    else f"{current_dynamic_pe:.2f} 倍"
-)
-
-
-if current_price is not None:
-
-    st.success(
-        "✅ 当前价格获取成功"
-    )
-
-else:
-
-    st.error(
-        "❌ 当前价格暂时无法获取"
-    )
-
-
     current_price = None
-    current_dynamic_pe = None
-    current_market_pb = None
-
+    day_change = None
+    realtime_pe = None
+    realtime_pb = None
 
     if market_data:
 
@@ -1012,83 +845,89 @@ else:
             stock_code
         )
 
-
         current_price = safe_float(
             market_data.get("最新价")
         )
-
 
         day_change = safe_float(
             market_data.get("涨跌幅")
         )
 
-
-        current_dynamic_pe = safe_float(
+        realtime_pe = safe_float(
             market_data.get("市盈率-动态")
         )
 
-
-        current_market_pb = safe_float(
+        realtime_pb = safe_float(
             market_data.get("市净率")
         )
 
+    # 实时价格失败，历史价格兜底
+    history = get_history_data(
+        stock_code
+    )
 
-        a1, a2, a3, a4 = st.columns(4)
+    if current_price is None:
 
-
-        a1.metric(
-            "股票名称",
-            str(stock_name)
+        fallback_price = (
+            get_history_latest_price(
+                history
+            )
         )
 
+        if fallback_price is not None:
 
-        a2.metric(
-            "当前价格",
-            "暂无"
-            if current_price is None
-            else f"{current_price:.2f} 元"
-        )
+            current_price = fallback_price
 
+            st.warning(
+                "⚠️ 实时价格接口不可用，"
+                "当前价格采用最近交易日收盘价作为估值参考价。"
+            )
 
-        a3.metric(
-            "当日涨跌幅",
-            "暂无"
-            if day_change is None
-            else f"{day_change:.2f}%"
-        )
-
-
-        a4.metric(
-            "实时动态PE",
-            "暂无"
-            if current_dynamic_pe is None
-            else f"{current_dynamic_pe:.2f} 倍"
-        )
-
+    if current_price is not None:
 
         st.success(
-            "✅ 实时行情获取成功"
+            "✅ 当前价格获取成功"
         )
-
 
     else:
 
-        st.warning(
-            "⚠️ 实时行情没有获取到"
+        st.error(
+            "❌ 当前价格暂时无法获取"
         )
 
+    a1, a2, a3, a4 = st.columns(4)
+
+    a1.metric(
+        "股票名称",
+        str(stock_name)
+    )
+
+    a2.metric(
+        "当前参考价格",
+        "暂无"
+        if current_price is None
+        else f"{current_price:.2f} 元"
+    )
+
+    a3.metric(
+        "当日涨跌幅",
+        "暂无"
+        if day_change is None
+        else f"{day_change:.2f}%"
+    )
+
+    a4.metric(
+        "动态PE",
+        "暂无"
+        if realtime_pe is None
+        else f"{realtime_pe:.2f} 倍"
+    )
 
     # =====================================================
     # 二、历史行情
     # =====================================================
 
     st.header("📈 二、历史行情")
-
-
-    history = get_history_data(
-        stock_code
-    )
-
 
     if history is not None:
 
@@ -1112,20 +951,17 @@ else:
             "⚠️ 历史行情获取失败"
         )
 
-
     # =====================================================
     # 三、财务指标
     # =====================================================
 
     st.header("📊 三、财务指标")
 
-
     indicators, indicator_source = (
         get_financial_indicators(
             stock_code
         )
     )
-
 
     if indicators is None:
 
@@ -1135,66 +971,69 @@ else:
 
         st.stop()
 
-
     st.success(
         f"✅ 财务指标获取成功：{indicator_source}"
     )
 
-
-    financial_data = extract_current_and_annual(
-        indicators
+    financial_data = (
+        process_financial_indicators(
+            indicators
+        )
     )
-
 
     latest_data = financial_data[
         "latest"
     ]
 
-
     annual_data = financial_data[
         "annual"
     ]
 
-
-    # 当前季度
-    latest_roe = latest_data["roe"]
-    latest_revenue_growth = latest_data[
-        "revenue_growth"
-    ]
-    latest_profit_growth = latest_data[
-        "profit_growth"
-    ]
-    latest_debt_ratio = latest_data[
-        "debt_ratio"
+    trend = financial_data[
+        "trend"
     ]
 
-
-    # 长期年度
-    annual_roe = annual_data["roe"]
-    annual_revenue_growth = annual_data[
-        "revenue_growth"
-    ]
-    annual_profit_growth = annual_data[
-        "profit_growth"
-    ]
-    annual_debt_ratio = annual_data[
-        "debt_ratio"
-    ]
-    annual_eps = annual_data["eps"]
-    annual_bvps = annual_data["bvps"]
-
-
-    # -----------------------------------------------------
-    # 最新一期
-    # -----------------------------------------------------
-
-    st.subheader(
-        "🔵 最新报告期：经营状态"
+    latest_roe = latest_data.get(
+        "roe"
     )
 
+    latest_revenue_growth = latest_data.get(
+        "revenue_growth"
+    )
+
+    latest_profit_growth = latest_data.get(
+        "profit_growth"
+    )
+
+    latest_debt_ratio = latest_data.get(
+        "debt"
+    )
+
+    annual_roe = annual_data.get(
+        "roe"
+    )
+
+    annual_revenue_growth = annual_data.get(
+        "revenue_growth"
+    )
+
+    annual_profit_growth = annual_data.get(
+        "profit_growth"
+    )
+
+    annual_debt_ratio = annual_data.get(
+        "debt"
+    )
+
+    annual_eps = annual_data.get(
+        "eps"
+    )
+
+    annual_bvps = annual_data.get(
+        "bvps"
+    )
 
     b1, b2, b3, b4 = st.columns(4)
-
 
     b1.metric(
         "最新ROE",
@@ -1203,14 +1042,12 @@ else:
         else f"{latest_roe:.2f}%"
     )
 
-
     b2.metric(
         "最新营收增长",
         "暂无"
         if latest_revenue_growth is None
         else f"{latest_revenue_growth:.2f}%"
     )
-
 
     b3.metric(
         "最新净利润增长",
@@ -1219,7 +1056,6 @@ else:
         else f"{latest_profit_growth:.2f}%"
     )
 
-
     b4.metric(
         "最新负债率",
         "暂无"
@@ -1227,18 +1063,11 @@ else:
         else f"{latest_debt_ratio:.2f}%"
     )
 
-
-    # -----------------------------------------------------
-    # 完整年度
-    # -----------------------------------------------------
-
     st.subheader(
         "🟢 最近完整年度：长期价值投资口径"
     )
 
-
     c1, c2, c3, c4 = st.columns(4)
-
 
     c1.metric(
         "年度ROE",
@@ -1247,14 +1076,12 @@ else:
         else f"{annual_roe:.2f}%"
     )
 
-
     c2.metric(
         "年度EPS",
         "暂无"
         if annual_eps is None
         else f"{annual_eps:.2f} 元"
     )
-
 
     c3.metric(
         "年度营收增长",
@@ -1263,7 +1090,6 @@ else:
         else f"{annual_revenue_growth:.2f}%"
     )
 
-
     c4.metric(
         "年度净利润增长",
         "暂无"
@@ -1271,9 +1097,7 @@ else:
         else f"{annual_profit_growth:.2f}%"
     )
 
-
     c5, c6 = st.columns(2)
-
 
     c5.metric(
         "年度资产负债率",
@@ -1282,7 +1106,6 @@ else:
         else f"{annual_debt_ratio:.2f}%"
     )
 
-
     c6.metric(
         "年度每股净资产",
         "暂无"
@@ -1290,38 +1113,32 @@ else:
         else f"{annual_bvps:.2f} 元"
     )
 
-
     # =====================================================
     # 四、三张报表
     # =====================================================
 
     st.header("💰 四、三张财务报表")
 
-
     profit = get_financial_report(
         stock_code,
         "利润表"
     )
-
 
     balance = get_financial_report(
         stock_code,
         "资产负债表"
     )
 
-
     cashflow = get_financial_report(
         stock_code,
         "现金流量表"
     )
 
-
-    report_metrics = extract_report_metrics(
+    report_metrics = get_report_metrics(
         profit,
         balance,
         cashflow
     )
-
 
     latest_revenue = report_metrics[
         "revenue"
@@ -1343,8 +1160,7 @@ else:
         "operating_cashflow"
     ]
 
-
-    report_success = sum(
+    report_count = sum(
         [
             profit is not None,
             balance is not None,
@@ -1352,11 +1168,9 @@ else:
         ]
     )
 
-
     st.write(
-        f"报表获取情况：{report_success}/3"
+        f"财务报表获取情况：{report_count}/3"
     )
-
 
     with st.expander(
         "查看原始财务报表"
@@ -1372,7 +1186,6 @@ else:
                 hide_index=True
             )
 
-
         if balance is not None:
 
             st.write("### 资产负债表")
@@ -1382,7 +1195,6 @@ else:
                 use_container_width=True,
                 hide_index=True
             )
-
 
         if cashflow is not None:
 
@@ -1394,46 +1206,38 @@ else:
                 hide_index=True
             )
 
-
     # =====================================================
-    # 五、最近一期关键数据
+    # 五、关键数据
     # =====================================================
 
     st.header("💵 五、最近一期关键数据")
 
-
     d1, d2, d3, d4, d5 = st.columns(5)
-
 
     d1.metric(
         "营业收入",
         format_money(latest_revenue)
     )
 
-
     d2.metric(
         "净利润",
         format_money(latest_profit)
     )
-
 
     d3.metric(
         "经营现金流",
         format_money(latest_cashflow)
     )
 
-
     d4.metric(
         "应收账款",
         format_money(latest_receivable)
     )
 
-
     d5.metric(
         "存货",
         format_money(latest_inventory)
     )
-
 
     # =====================================================
     # 六、财务排雷
@@ -1441,27 +1245,22 @@ else:
 
     st.header("🚨 六、财务排雷")
 
-
     cash_profit_ratio = safe_ratio(
         latest_cashflow,
         latest_profit
     )
-
 
     receivable_ratio = safe_ratio(
         latest_receivable,
         latest_revenue
     )
 
-
     inventory_ratio = safe_ratio(
         latest_inventory,
         latest_revenue
     )
 
-
     f1, f2, f3 = st.columns(3)
-
 
     f1.metric(
         "经营现金流 / 净利润",
@@ -1470,14 +1269,12 @@ else:
         else f"{cash_profit_ratio:.2f}"
     )
 
-
     f2.metric(
         "应收账款 / 营收",
         "暂无"
         if receivable_ratio is None
         else f"{receivable_ratio:.2%}"
     )
-
 
     f3.metric(
         "存货 / 营收",
@@ -1486,10 +1283,8 @@ else:
         else f"{inventory_ratio:.2%}"
     )
 
-
     risk_score = 0
     risk_items = []
-
 
     if (
         cash_profit_ratio is not None
@@ -1502,10 +1297,9 @@ else:
             "经营现金流与净利润匹配度偏低"
         )
 
-
     if (
         receivable_ratio is not None
-        and receivable_ratio > 0.4
+        and receivable_ratio > 0.40
     ):
 
         risk_score += 2
@@ -1514,10 +1308,9 @@ else:
             "应收账款占营业收入比例较高"
         )
 
-
     if (
         inventory_ratio is not None
-        and inventory_ratio > 0.5
+        and inventory_ratio > 0.50
     ):
 
         risk_score += 2
@@ -1525,7 +1318,6 @@ else:
         risk_items.append(
             "存货占营业收入比例较高"
         )
-
 
     if (
         annual_roe is not None
@@ -1538,7 +1330,6 @@ else:
             "长期ROE偏低"
         )
 
-
     if (
         annual_debt_ratio is not None
         and annual_debt_ratio >= 70
@@ -1550,7 +1341,6 @@ else:
             "资产负债率偏高"
         )
 
-
     if risk_score == 0:
 
         st.success(
@@ -1560,13 +1350,13 @@ else:
     elif risk_score <= 2:
 
         st.warning(
-            "🟡 有少量风险信号，需要观察"
+            "🟡 存在少量需要观察的风险信号"
         )
 
     elif risk_score <= 4:
 
         st.warning(
-            "🟠 存在多个值得深入研究的风险信号"
+            "🟠 存在多个需要深入研究的风险信号"
         )
 
     else:
@@ -1575,8 +1365,11 @@ else:
             "🔴 财务风险信号较多"
         )
 
-
     if risk_items:
+
+        st.write(
+            "### 重点风险"
+        )
 
         for item in risk_items:
 
@@ -1584,24 +1377,11 @@ else:
                 f"- {item}"
             )
 
-
     # =====================================================
     # 七、5年财务质量
     # =====================================================
 
     st.header("⭐ 七、5年财务质量")
-
-
-    trend = financial_data[
-        "trend"
-    ]
-
-
-    roe_values = []
-    revenue_values = []
-    profit_values = []
-    debt_values = []
-
 
     if trend is not None and not trend.empty:
 
@@ -1611,46 +1391,48 @@ else:
             hide_index=True
         )
 
+    roe_values = []
+    revenue_values = []
+    profit_values = []
+    debt_values = []
+
+    if trend is not None and not trend.empty:
 
         if "ROE" in trend.columns:
 
-            roe_values = [
-                safe_float(x)
-                for x in trend["ROE"]
-                if safe_float(x) is not None
-            ]
+            for value in trend["ROE"]:
 
+                number = safe_float(value)
+
+                if number is not None:
+                    roe_values.append(number)
 
         if "营收增长率" in trend.columns:
 
-            revenue_values = [
-                safe_float(x)
-                for x in trend["营收增长率"]
-                if safe_float(x) is not None
-            ]
+            for value in trend["营收增长率"]:
 
+                number = safe_float(value)
+
+                if number is not None:
+                    revenue_values.append(number)
 
         if "净利润增长率" in trend.columns:
 
-            profit_values = [
-                safe_float(x)
-                for x in trend["净利润增长率"]
-                if safe_float(x) is not None
-            ]
+            for value in trend["净利润增长率"]:
 
+                number = safe_float(value)
+
+                if number is not None:
+                    profit_values.append(number)
 
         if "资产负债率" in trend.columns:
 
-            debt_values = [
-                safe_float(x)
-                for x in trend["资产负债率"]
-                if safe_float(x) is not None
-            ]
+            for value in trend["资产负债率"]:
 
+                number = safe_float(value)
 
-    # =====================================================
-    # 评分
-    # =====================================================
+                if number is not None:
+                    debt_values.append(number)
 
     roe_score = 0
     growth_score = 0
@@ -1658,29 +1440,36 @@ else:
     debt_score = 0
     cash_score = 0
 
-
+    # ROE 20分
     if roe_values:
 
-        avg_roe = sum(roe_values) / len(roe_values)
+        avg_roe = sum(roe_values) / len(
+            roe_values
+        )
+
         min_roe = min(roe_values)
 
-
         if avg_roe >= 20 and min_roe >= 15:
+
             roe_score = 20
 
         elif avg_roe >= 15 and min_roe >= 10:
+
             roe_score = 17
 
         elif avg_roe >= 10:
+
             roe_score = 13
 
         elif avg_roe >= 5:
+
             roe_score = 8
 
         else:
+
             roe_score = 3
 
-
+    # 营收成长 20分
     if revenue_values:
 
         avg_growth = (
@@ -1694,20 +1483,29 @@ else:
             if x >= 0
         )
 
+        if (
+            avg_growth >= 15
+            and positive_years >= 4
+        ):
 
-        if avg_growth >= 15 and positive_years >= 4:
             growth_score = 20
 
-        elif avg_growth >= 8 and positive_years >= 4:
+        elif (
+            avg_growth >= 8
+            and positive_years >= 4
+        ):
+
             growth_score = 16
 
         elif avg_growth >= 0:
+
             growth_score = 11
 
         else:
+
             growth_score = 4
 
-
+    # 净利润成长 20分
     if profit_values:
 
         avg_profit_growth = (
@@ -1720,7 +1518,6 @@ else:
             for x in profit_values
             if x >= 0
         )
-
 
         if (
             avg_profit_growth >= 20
@@ -1744,7 +1541,7 @@ else:
 
             profit_score = 4
 
-
+    # 财务安全 20分
     if debt_values:
 
         avg_debt = (
@@ -1752,37 +1549,44 @@ else:
             / len(debt_values)
         )
 
-
         if avg_debt < 50:
+
             debt_score = 20
 
         elif avg_debt < 60:
+
             debt_score = 17
 
         elif avg_debt < 70:
+
             debt_score = 13
 
         elif avg_debt < 80:
+
             debt_score = 8
 
         else:
+
             debt_score = 3
 
-
+    # 现金流 20分
     if cash_profit_ratio is not None:
 
         if cash_profit_ratio >= 1:
+
             cash_score = 20
 
         elif cash_profit_ratio >= 0.7:
+
             cash_score = 16
 
         elif cash_profit_ratio >= 0:
+
             cash_score = 10
 
         else:
-            cash_score = 3
 
+            cash_score = 3
 
     financial_quality_score = min(
         100,
@@ -1794,7 +1598,6 @@ else:
             + cash_score
         )
     )
-
 
     if financial_quality_score >= 85:
 
@@ -1812,44 +1615,56 @@ else:
 
         financial_rating = "偏弱"
 
+    q1, q2 = st.columns(2)
 
-    g1, g2 = st.columns(2)
-
-
-    g1.metric(
+    q1.metric(
         "财务质量总分",
         f"{financial_quality_score}/100"
     )
 
-
-    g2.metric(
-        "综合评级",
+    q2.metric(
+        "财务质量评级",
         financial_rating
     )
 
+    score_df = pd.DataFrame({
+        "维度": [
+            "ROE及盈利能力",
+            "营收成长",
+            "净利润成长",
+            "财务安全",
+            "现金流质量"
+        ],
+        "得分": [
+            f"{roe_score}/20",
+            f"{growth_score}/20",
+            f"{profit_score}/20",
+            f"{debt_score}/20",
+            f"{cash_score}/20"
+        ]
+    })
+
+    st.dataframe(
+        score_df,
+        use_container_width=True,
+        hide_index=True
+    )
 
     # =====================================================
     # 八、价值估值
     # =====================================================
 
-    st.divider()
-
     st.header("💰 八、长期价值估值")
 
-
     st.caption(
-        "重要：长期估值优先使用最近完整年度EPS、BPS和ROE；"
-        "最新季度数据只用于观察近期经营状态。"
+        "长期估值优先采用最近完整年度EPS、BPS和ROE。"
     )
-
 
     valuation_eps = annual_eps
     valuation_bvps = annual_bvps
     valuation_roe = annual_roe
 
-
     v1, v2, v3, v4 = st.columns(4)
-
 
     v1.metric(
         "当前价格",
@@ -1858,14 +1673,12 @@ else:
         else f"{current_price:.2f} 元"
     )
 
-
     v2.metric(
         "年度EPS",
         "暂无"
         if valuation_eps is None
         else f"{valuation_eps:.2f} 元"
     )
-
 
     v3.metric(
         "年度ROE",
@@ -1874,7 +1687,6 @@ else:
         else f"{valuation_roe:.2f}%"
     )
 
-
     v4.metric(
         "年度BPS",
         "暂无"
@@ -1882,14 +1694,8 @@ else:
         else f"{valuation_bvps:.2f} 元"
     )
 
-
-    # =====================================================
-    # 当前PE/PB
-    # =====================================================
-
     current_pe = None
     current_pb = None
-
 
     if (
         current_price is not None
@@ -1902,7 +1708,6 @@ else:
             / valuation_eps
         )
 
-
     if (
         current_price is not None
         and valuation_bvps is not None
@@ -1914,109 +1719,89 @@ else:
             / valuation_bvps
         )
 
+    ev1, ev2 = st.columns(2)
 
-    vv1, vv2 = st.columns(2)
-
-
-    vv1.metric(
-        "当前PE（年度EPS）",
+    ev1.metric(
+        "当前PE",
         "暂无"
         if current_pe is None
         else f"{current_pe:.2f} 倍"
     )
 
-
-    vv2.metric(
+    ev2.metric(
         "当前PB",
         "暂无"
         if current_pb is None
         else f"{current_pb:.2f} 倍"
     )
 
-
     # =====================================================
-    # 九、PE参数
+    # 九、PE/PB参数
     # =====================================================
 
     st.subheader(
-        "⚙️ PE估值参数"
+        "⚙️ 三情景估值参数"
     )
-
 
     if valuation_roe is not None:
 
         if valuation_roe >= 20:
 
-            default_pe_c = 14.0
-            default_pe_n = 18.0
-            default_pe_o = 22.0
+            pe_conservative = 14.0
+            pe_normal = 18.0
+            pe_optimistic = 22.0
 
         elif valuation_roe >= 15:
 
-            default_pe_c = 13.0
-            default_pe_n = 17.0
-            default_pe_o = 21.0
+            pe_conservative = 13.0
+            pe_normal = 17.0
+            pe_optimistic = 21.0
 
         elif valuation_roe >= 10:
 
-            default_pe_c = 10.0
-            default_pe_n = 14.0
-            default_pe_o = 18.0
+            pe_conservative = 10.0
+            pe_normal = 14.0
+            pe_optimistic = 18.0
 
         else:
 
-            default_pe_c = 8.0
-            default_pe_n = 11.0
-            default_pe_o = 14.0
+            pe_conservative = 8.0
+            pe_normal = 11.0
+            pe_optimistic = 14.0
 
     else:
 
-        default_pe_c = 10.0
-        default_pe_n = 14.0
-        default_pe_o = 18.0
-
+        pe_conservative = 10.0
+        pe_normal = 14.0
+        pe_optimistic = 18.0
 
     pe1, pe2, pe3 = st.columns(3)
-
 
     pe_c = pe1.number_input(
         "保守PE",
         min_value=3.0,
         max_value=50.0,
-        value=default_pe_c,
+        value=pe_conservative,
         step=1.0
     )
-
 
     pe_n = pe2.number_input(
         "中性PE",
         min_value=3.0,
         max_value=50.0,
-        value=default_pe_n,
+        value=pe_normal,
         step=1.0
     )
-
 
     pe_o = pe3.number_input(
         "乐观PE",
         min_value=3.0,
         max_value=50.0,
-        value=default_pe_o,
+        value=pe_optimistic,
         step=1.0
     )
 
-
-    # =====================================================
-    # 十、PB参数
-    # =====================================================
-
-    st.subheader(
-        "📚 PB估值参数"
-    )
-
-
     pb1, pb2, pb3 = st.columns(3)
-
 
     pb_c = pb1.number_input(
         "保守PB",
@@ -2026,7 +1811,6 @@ else:
         step=0.1
     )
 
-
     pb_n = pb2.number_input(
         "中性PB",
         min_value=0.3,
@@ -2034,7 +1818,6 @@ else:
         value=2.0,
         step=0.1
     )
-
 
     pb_o = pb3.number_input(
         "乐观PB",
@@ -2044,58 +1827,35 @@ else:
         step=0.1
     )
 
-
     # =====================================================
-    # 十一、PE估值
+    # 十、情景估值
     # =====================================================
 
     pe_c_value = None
     pe_n_value = None
     pe_o_value = None
 
+    if (
+        valuation_eps is not None
+        and valuation_eps > 0
+    ):
 
-    if valuation_eps is not None and valuation_eps > 0:
-
-        pe_c_value = (
-            valuation_eps * pe_c
-        )
-
-        pe_n_value = (
-            valuation_eps * pe_n
-        )
-
-        pe_o_value = (
-            valuation_eps * pe_o
-        )
-
-
-    # =====================================================
-    # 十二、PB估值
-    # =====================================================
+        pe_c_value = valuation_eps * pe_c
+        pe_n_value = valuation_eps * pe_n
+        pe_o_value = valuation_eps * pe_o
 
     pb_c_value = None
     pb_n_value = None
     pb_o_value = None
 
+    if (
+        valuation_bvps is not None
+        and valuation_bvps > 0
+    ):
 
-    if valuation_bvps is not None and valuation_bvps > 0:
-
-        pb_c_value = (
-            valuation_bvps * pb_c
-        )
-
-        pb_n_value = (
-            valuation_bvps * pb_n
-        )
-
-        pb_o_value = (
-            valuation_bvps * pb_o
-        )
-
-
-    # =====================================================
-    # 十三、动态权重
-    # =====================================================
+        pb_c_value = valuation_bvps * pb_c
+        pb_n_value = valuation_bvps * pb_n
+        pb_o_value = valuation_bvps * pb_o
 
     if valuation_roe is not None:
 
@@ -2124,66 +1884,48 @@ else:
         pe_weight = 0.60
         pb_weight = 0.40
 
-
-    st.write(
-        f"估值权重：PE {pe_weight:.0%} / PB {pb_weight:.0%}"
-    )
-
-
-    # =====================================================
-    # 十四、综合估值
-    # =====================================================
-
     def combine_value(
         pe_value,
         pb_value
     ):
 
-        if pe_value is not None and pb_value is not None:
+        if (
+            pe_value is not None
+            and pb_value is not None
+        ):
 
             return (
                 pe_value * pe_weight
                 + pb_value * pb_weight
             )
 
-
         if pe_value is not None:
             return pe_value
-
 
         if pb_value is not None:
             return pb_value
 
-
         return None
-
 
     conservative_value = combine_value(
         pe_c_value,
         pb_c_value
     )
 
-
     normal_value = combine_value(
         pe_n_value,
         pb_n_value
     )
-
 
     optimistic_value = combine_value(
         pe_o_value,
         pb_o_value
     )
 
-
-    # =====================================================
-    # 十五、估值表
-    # =====================================================
-
-    st.subheader(
-        "🎯 三种情景估值"
+    st.write(
+        f"估值权重：PE {pe_weight:.0%} / "
+        f"PB {pb_weight:.0%}"
     )
-
 
     valuation_table = pd.DataFrame({
 
@@ -2210,18 +1952,16 @@ else:
             normal_value,
             optimistic_value
         ]
-
     })
 
-
-    for column in [
+    for col in [
         "PE估值",
         "PB估值",
         "综合估值"
     ]:
 
-        valuation_table[column] = (
-            valuation_table[column]
+        valuation_table[col] = (
+            valuation_table[col]
             .apply(
                 lambda x:
                 "暂无"
@@ -2230,50 +1970,39 @@ else:
             )
         )
 
-
     st.dataframe(
         valuation_table,
         use_container_width=True,
         hide_index=True
     )
 
-
     # =====================================================
-    # 十六、投资价格区间
+    # 十一、投资价格区间
     # =====================================================
 
     st.header(
-        "💰 十六、投资价格区间"
+        "💰 十一、投资价格区间"
     )
-
 
     heavy_price = None
     entry_price = None
     high_price = None
 
-
     if normal_value is not None:
 
-        # 重仓：合理价值70%
         heavy_price = (
             normal_value * 0.70
         )
 
-        # 建仓：合理价值85%
         entry_price = (
             normal_value * 0.85
         )
 
-
     if optimistic_value is not None:
 
-        high_price = (
-            optimistic_value
-        )
-
+        high_price = optimistic_value
 
     p1, p2, p3, p4 = st.columns(4)
-
 
     p1.metric(
         "重仓参考价",
@@ -2282,14 +2011,12 @@ else:
         else f"{heavy_price:.2f} 元"
     )
 
-
     p2.metric(
         "建仓参考价",
         "暂无"
         if entry_price is None
         else f"{entry_price:.2f} 元"
     )
-
 
     p3.metric(
         "中性合理价",
@@ -2298,7 +2025,6 @@ else:
         else f"{normal_value:.2f} 元"
     )
 
-
     p4.metric(
         "高估参考价",
         "暂无"
@@ -2306,18 +2032,15 @@ else:
         else f"{high_price:.2f} 元"
     )
 
-
     # =====================================================
-    # 十七、当前价格判断
+    # 十二、价格判断
     # =====================================================
 
     st.subheader(
         "🔍 当前价格判断"
     )
 
-
     valuation_gap = None
-
 
     if (
         current_price is not None
@@ -2331,12 +2054,10 @@ else:
             - 1
         ) * 100
 
-
         st.metric(
             "相对中性合理价值空间",
             f"{valuation_gap:.2f}%"
         )
-
 
         if (
             heavy_price is not None
@@ -2347,7 +2068,6 @@ else:
                 "🟢 当前进入重仓观察区"
             )
 
-
         elif (
             entry_price is not None
             and current_price <= entry_price
@@ -2357,13 +2077,11 @@ else:
                 "🟢 当前进入建仓观察区"
             )
 
-
         elif current_price <= normal_value:
 
             st.info(
-                "🟡 当前低于合理价值，但安全边际一般"
+                "🟡 当前低于中性合理价值，但安全边际一般"
             )
-
 
         elif (
             high_price is not None
@@ -2371,9 +2089,8 @@ else:
         ):
 
             st.warning(
-                "🟠 当前高于中性合理价，等待更好安全边际"
+                "🟠 当前高于中性合理价，建议等待更好的安全边际"
             )
-
 
         else:
 
@@ -2381,33 +2098,26 @@ else:
                 "🔴 当前价格高于乐观估值"
             )
 
-
     else:
 
         st.warning(
             "⚠️ 当前数据不足，无法完成价格判断"
         )
 
-
     # =====================================================
-    # 十八、综合投资评分
+    # 十三、综合投资评分
     # =====================================================
-
-    st.divider()
 
     st.header(
-        "🏆 十八、ValueStock AI 综合投资评级"
+        "🏆 十三、ValueStock AI综合投资评级"
     )
-
 
     financial_component = (
         financial_quality_score * 0.30
     )
 
-
     # 成长性
     growth_component = 0
-
 
     if (
         annual_revenue_growth is not None
@@ -2419,130 +2129,150 @@ else:
             + annual_profit_growth
         ) / 2
 
-
         if growth_avg >= 20:
+
             growth_component = 20
 
         elif growth_avg >= 15:
+
             growth_component = 17
 
         elif growth_avg >= 10:
+
             growth_component = 14
 
         elif growth_avg >= 5:
+
             growth_component = 10
 
         elif growth_avg >= 0:
+
             growth_component = 6
 
         else:
-            growth_component = 2
 
+            growth_component = 2
 
     # 盈利能力
     profitability_component = 0
 
-
     if annual_roe is not None:
 
         if annual_roe >= 20:
+
             profitability_component = 15
 
         elif annual_roe >= 15:
+
             profitability_component = 13
 
         elif annual_roe >= 10:
+
             profitability_component = 10
 
         elif annual_roe >= 5:
+
             profitability_component = 6
 
         else:
-            profitability_component = 2
 
+            profitability_component = 2
 
     # 现金流
     cash_component = 0
 
-
     if cash_profit_ratio is not None:
 
         if cash_profit_ratio >= 1:
+
             cash_component = 15
 
         elif cash_profit_ratio >= 0.8:
+
             cash_component = 13
 
         elif cash_profit_ratio >= 0.6:
+
             cash_component = 10
 
         elif cash_profit_ratio >= 0.3:
+
             cash_component = 6
 
         elif cash_profit_ratio >= 0:
-            cash_component = 3
 
+            cash_component = 3
 
     # 财务安全
     safety_component = 0
 
-
     if annual_debt_ratio is not None:
 
         if annual_debt_ratio < 40:
+
             safety_component = 10
 
         elif annual_debt_ratio < 50:
+
             safety_component = 9
 
         elif annual_debt_ratio < 60:
+
             safety_component = 7
 
         elif annual_debt_ratio < 70:
+
             safety_component = 5
 
         else:
-            safety_component = 2
 
+            safety_component = 2
 
     # 估值
     valuation_component = 0
 
-
     if valuation_gap is not None:
 
         if valuation_gap >= 30:
+
             valuation_component = 10
 
         elif valuation_gap >= 20:
+
             valuation_component = 9
 
         elif valuation_gap >= 10:
+
             valuation_component = 8
 
         elif valuation_gap >= 0:
+
             valuation_component = 6
 
         elif valuation_gap >= -10:
+
             valuation_component = 4
 
         elif valuation_gap >= -20:
-            valuation_component = 2
 
+            valuation_component = 2
 
     # 风险扣分
     if risk_score >= 6:
+
         risk_penalty = 12
 
     elif risk_score >= 4:
+
         risk_penalty = 8
 
     elif risk_score >= 2:
+
         risk_penalty = 4
 
     else:
-        risk_penalty = 0
 
+        risk_penalty = 0
 
     final_score = round(
         max(
@@ -2560,42 +2290,47 @@ else:
         )
     )
 
-
     if final_score >= 85:
 
-        final_rating = "A：优秀长期价值候选"
+        final_rating = (
+            "A：优秀长期价值候选"
+        )
 
     elif final_score >= 75:
 
-        final_rating = "B：优质，值得长期跟踪"
+        final_rating = (
+            "B：优质，值得长期跟踪"
+        )
 
     elif final_score >= 65:
 
-        final_rating = "C：一般，等待更多验证"
+        final_rating = (
+            "C：一般，等待更多验证"
+        )
 
     elif final_score >= 50:
 
-        final_rating = "D：谨慎，不适合重仓"
+        final_rating = (
+            "D：谨慎，不适合重仓"
+        )
 
     else:
 
-        final_rating = "E：风险较高"
-
+        final_rating = (
+            "E：风险较高"
+        )
 
     r1, r2 = st.columns(2)
-
 
     r1.metric(
         "ValueStock AI综合分",
         f"{final_score}/100"
     )
 
-
     r2.metric(
         "投资评级",
         final_rating
     )
-
 
     score_table = pd.DataFrame({
 
@@ -2625,9 +2360,7 @@ else:
             safety_component,
             valuation_component
         ]
-
     })
-
 
     st.dataframe(
         score_table,
@@ -2635,66 +2368,77 @@ else:
         hide_index=True
     )
 
-
     # =====================================================
-    # 十九、最终结论
+    # 十四、最终投资结论
     # =====================================================
 
-    st.subheader(
-        "🏆 十九、最终投资结论"
+    st.header(
+        "🏆 十四、最终投资结论"
     )
-
 
     if final_score >= 85:
 
         conclusion = (
-            "公司综合质量优秀，具备长期重点研究价值。"
+            "公司综合质量优秀，"
+            "具备长期重点研究价值。"
         )
 
     elif final_score >= 75:
 
         conclusion = (
-            "公司综合质量较好，值得长期跟踪。"
+            "公司综合质量较好，"
+            "值得长期跟踪。"
         )
 
     elif final_score >= 65:
 
         conclusion = (
-            "公司具备一定价值，但仍需要进一步验证。"
+            "公司具备一定价值，"
+            "但仍需要进一步验证。"
         )
 
     elif final_score >= 50:
 
         conclusion = (
-            "公司存在一定风险，当前不适合重仓。"
+            "公司存在一定风险，"
+            "当前不适合重仓。"
         )
 
     else:
 
         conclusion = (
-            "当前综合质量偏弱，不建议作为长期核心资产。"
+            "当前综合质量偏弱，"
+            "不建议作为长期核心资产。"
         )
-
 
     st.info(
         conclusion
     )
 
+    if risk_items:
+
+        st.subheader(
+            "⚠️ 重点风险"
+        )
+
+        for item in risk_items:
+
+            st.write(
+                f"- {item}"
+            )
 
     # =====================================================
-    # 二十、数据诊断
+    # 十五、数据诊断
     # =====================================================
 
-    st.subheader(
-        "🛠️ 二十、数据诊断"
+    st.header(
+        "🛠️ 十五、数据诊断"
     )
-
 
     diagnostic = pd.DataFrame({
 
         "项目": [
-
-            "实时行情",
+            "实时/参考价格",
             "历史行情",
             "财务指标",
             "最新ROE",
@@ -2710,7 +2454,6 @@ else:
             "合理价",
             "建仓价",
             "重仓价"
-
         ],
 
         "状态": [
@@ -2778,11 +2521,8 @@ else:
             "✅"
             if heavy_price is not None
             else "❌"
-
         ]
-
     })
-
 
     st.dataframe(
         diagnostic,
@@ -2790,21 +2530,20 @@ else:
         hide_index=True
     )
 
-
     # =====================================================
-    # 二十一、口径说明
+    # 十六、说明
     # =====================================================
 
     with st.expander(
-        "📖 估值口径说明"
+        "📖 估值与数据口径说明"
     ):
 
         st.write(
-            "最新报告期数据：用于判断近期经营状态。"
+            "最新报告期数据：主要用于判断近期经营状态。"
         )
 
         st.write(
-            "最近完整年度数据：用于长期价值投资和估值。"
+            "最近完整年度数据：主要用于长期价值投资和估值。"
         )
 
         st.write(
@@ -2812,18 +2551,28 @@ else:
         )
 
         st.write(
-            "PE/PB综合估值不是未来股价预测，而是安全边际研究工具。"
+            "PB = 当前价格 ÷ 年度每股净资产。"
         )
 
         st.write(
-            "当前版本暂未加入历史PE分位、行业PE分位、DCF和未来盈利预测。"
+            "PE/PB综合估值用于安全边际研究，不是未来股价预测。"
         )
 
+        st.write(
+            "建仓参考价 = 中性合理价 × 85%。"
+        )
+
+        st.write(
+            "重仓参考价 = 中性合理价 × 70%。"
+        )
+
+        st.write(
+            "当前版本尚未加入历史PE分位、同行估值、DCF和未来盈利预测。"
+        )
 
     st.divider()
 
     st.caption(
-        "ValueStock AI V12.1："
-        "以稳定数据链路为优先，"
-        "季度数据与年度估值分离。"
+        "ValueStock AI V12.2：稳定数据链路 + "
+        "财务质量 + 财务排雷 + 三情景估值 + 综合投资评级。"
     )
