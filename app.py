@@ -21,6 +21,10 @@ from peer_compare import (
     compare_target_with_average
 )
 
+from investment_score import (
+    calculate_investment_score
+)
+
 
 # =========================================================
 # 0. 页面设置
@@ -33,10 +37,10 @@ st.set_page_config(
 )
 
 st.title("📈 ValueStock AI")
-st.subheader("A股长期价值投资分析系统 V13")
+st.subheader("A股长期价值投资分析系统 V14")
 
 st.caption(
-    "模块化版本：财务 + 风险 + 估值 + 同行业比较"
+    "财务质量 + 财务排雷 + 估值 + 同行业竞争力 + 综合投资价值评分"
 )
 
 st.divider()
@@ -303,7 +307,7 @@ def get_financial_report(
 
 
 # =========================================================
-# 6. 财务报表字段
+# 6. 报表字段
 # =========================================================
 
 def get_latest_report_value(
@@ -385,7 +389,7 @@ def get_report_metrics(
 
 
 # =========================================================
-# 7. 获取单家公司年度财务数据
+# 7. 同行公司财务数据
 # =========================================================
 
 def get_company_financial_data(
@@ -450,7 +454,7 @@ def get_company_financial_data(
 
 
 # =========================================================
-# 8. 股票代码输入
+# 8. 输入
 # =========================================================
 
 stock_input = st.text_input(
@@ -487,6 +491,10 @@ if analyze:
 
         st.stop()
 
+    st.info(
+        f"正在分析 {stock_code}，请稍候……"
+    )
+
 
     # =====================================================
     # 一、行情
@@ -496,13 +504,11 @@ if analyze:
         "📌 一、目标公司行情"
     )
 
-
     realtime = (
         get_realtime_market(
             stock_code
         )
     )
-
 
     history = (
         get_history_data(
@@ -510,15 +516,10 @@ if analyze:
         )
     )
 
-
     stock_name = stock_code
-
     current_price = None
-
     day_change = None
-
     realtime_pe = None
-
 
     if realtime:
 
@@ -551,7 +552,6 @@ if analyze:
             )
         )
 
-
     if current_price is None:
 
         current_price = (
@@ -560,15 +560,12 @@ if analyze:
             )
         )
 
-
     c1, c2, c3, c4 = st.columns(4)
-
 
     c1.metric(
         "股票名称",
         stock_name
     )
-
 
     c2.metric(
         "当前价格",
@@ -577,14 +574,12 @@ if analyze:
         else f"{current_price:.2f} 元"
     )
 
-
     c3.metric(
         "涨跌幅",
         "暂无"
         if day_change is None
         else f"{day_change:.2f}%"
     )
-
 
     c4.metric(
         "动态PE",
@@ -595,20 +590,18 @@ if analyze:
 
 
     # =====================================================
-    # 二、目标公司财务
+    # 二、财务
     # =====================================================
 
     st.header(
-        "📊 二、目标公司财务"
+        "📊 二、财务分析"
     )
-
 
     indicators = (
         get_financial_indicators(
             stock_code
         )
     )
-
 
     if indicators is None:
 
@@ -618,34 +611,23 @@ if analyze:
 
         st.stop()
 
-
     financial_data = (
         process_financial_indicators(
             indicators
         )
     )
 
+    latest = financial_data[
+        "latest"
+    ]
 
-    latest = (
-        financial_data[
-            "latest"
-        ]
-    )
+    annual = financial_data[
+        "annual"
+    ]
 
-
-    annual = (
-        financial_data[
-            "annual"
-        ]
-    )
-
-
-    trend = (
-        financial_data[
-            "trend"
-        ]
-    )
-
+    trend = financial_data[
+        "trend"
+    ]
 
     latest_roe = latest.get(
         "roe"
@@ -666,7 +648,6 @@ if analyze:
     latest_debt = latest.get(
         "debt"
     )
-
 
     annual_roe = annual.get(
         "roe"
@@ -696,9 +677,7 @@ if analyze:
         "bvps"
     )
 
-
     c1, c2, c3, c4 = st.columns(4)
-
 
     c1.metric(
         "最新ROE",
@@ -707,7 +686,6 @@ if analyze:
         else f"{latest_roe:.2f}%"
     )
 
-
     c2.metric(
         "营收增长",
         "暂无"
@@ -715,14 +693,12 @@ if analyze:
         else f"{latest_revenue_growth:.2f}%"
     )
 
-
     c3.metric(
         "净利润增长",
         "暂无"
         if latest_profit_growth is None
         else f"{latest_profit_growth:.2f}%"
     )
-
 
     c4.metric(
         "资产负债率",
@@ -740,14 +716,12 @@ if analyze:
         "💰 三、三大报表"
     )
 
-
     profit = (
         get_financial_report(
             stock_code,
             "利润表"
         )
     )
-
 
     balance = (
         get_financial_report(
@@ -756,14 +730,12 @@ if analyze:
         )
     )
 
-
     cashflow = (
         get_financial_report(
             stock_code,
             "现金流量表"
         )
     )
-
 
     metrics = (
         get_report_metrics(
@@ -773,34 +745,27 @@ if analyze:
         )
     )
 
-
     latest_revenue = metrics[
         "revenue"
     ]
-
 
     latest_profit = metrics[
         "net_profit"
     ]
 
-
     latest_receivable = metrics[
         "receivable"
     ]
-
 
     latest_inventory = metrics[
         "inventory"
     ]
 
-
     latest_cashflow = metrics[
         "operating_cashflow"
     ]
 
-
     d1, d2, d3, d4, d5 = st.columns(5)
-
 
     d1.metric(
         "营业收入",
@@ -809,14 +774,12 @@ if analyze:
         )
     )
 
-
     d2.metric(
         "净利润",
         format_money(
             latest_profit
         )
     )
-
 
     d3.metric(
         "经营现金流",
@@ -825,14 +788,12 @@ if analyze:
         )
     )
 
-
     d4.metric(
         "应收账款",
         format_money(
             latest_receivable
         )
     )
-
 
     d5.metric(
         "存货",
@@ -847,9 +808,8 @@ if analyze:
     # =====================================================
 
     st.header(
-        "🚨 四、财务风险"
+        "🚨 四、财务排雷"
     )
-
 
     risk_result = (
         analyze_financial_risk(
@@ -884,13 +844,11 @@ if analyze:
         )
     )
 
-
     risk_score = (
         risk_result[
             "score"
         ]
     )
-
 
     risk_level = (
         risk_result[
@@ -898,32 +856,48 @@ if analyze:
         ]
     )
 
-
     cash_result = (
         risk_result[
             "cashflow"
         ]
     )
 
-
     st.write(
         f"**风险等级：{risk_level}**"
     )
-
 
     st.write(
         f"**风险评分：{risk_score}**"
     )
 
+    if risk_result[
+        "risk_items"
+    ]:
+
+        for item in (
+            risk_result[
+                "risk_items"
+            ]
+        ):
+
+            st.write(
+                f"- {item}"
+            )
+
+    else:
+
+        st.success(
+            "🟢 暂未发现明显财务风险信号"
+        )
+
 
     # =====================================================
-    # 五、5年财务质量
+    # 五、财务质量
     # =====================================================
 
     st.header(
         "⭐ 五、5年财务质量"
     )
-
 
     if (
         trend is not None
@@ -936,7 +910,6 @@ if analyze:
             hide_index=True
         )
 
-
     financial_quality = (
         calculate_financial_quality(
             trend,
@@ -944,17 +917,14 @@ if analyze:
         )
     )
 
+    fq1, fq2 = st.columns(2)
 
-    q1, q2 = st.columns(2)
-
-
-    q1.metric(
+    fq1.metric(
         "财务质量评分",
         f"{financial_quality['score']}/100"
     )
 
-
-    q2.metric(
+    fq2.metric(
         "财务质量评级",
         financial_quality["rating"]
     )
@@ -965,14 +935,11 @@ if analyze:
     # =====================================================
 
     st.header(
-        "💰 六、估值"
+        "💰 六、长期价值估值"
     )
 
-
     current_pe = None
-
     current_pb = None
-
 
     if (
         current_price is not None
@@ -985,7 +952,6 @@ if analyze:
             / annual_eps
         )
 
-
     if (
         current_price is not None
         and annual_bvps is not None
@@ -996,7 +962,6 @@ if analyze:
             current_price
             / annual_bvps
         )
-
 
     if annual_roe is not None:
 
@@ -1030,13 +995,9 @@ if analyze:
         pe_n = 14.0
         pe_o = 18.0
 
-
     pb_c = 1.5
-
     pb_n = 2.0
-
     pb_o = 2.5
-
 
     if annual_roe is not None:
 
@@ -1065,7 +1026,6 @@ if analyze:
         pe_weight = 0.60
         pb_weight = 0.40
 
-
     valuation_result = (
         calculate_valuation_scenarios(
 
@@ -1091,13 +1051,11 @@ if analyze:
         )
     )
 
-
     normal_value = (
         valuation_result[
             "normal"
         ]
     )
-
 
     entry_price = (
         valuation_result[
@@ -1105,13 +1063,11 @@ if analyze:
         ]
     )
 
-
     heavy_price = (
         valuation_result[
             "heavy_price"
         ]
     )
-
 
     optimistic_value = (
         valuation_result[
@@ -1119,35 +1075,30 @@ if analyze:
         ]
     )
 
+    v1, v2, v3, v4 = st.columns(4)
 
-    e1, e2, e3, e4 = st.columns(4)
-
-
-    e1.metric(
+    v1.metric(
         "当前PE",
         "暂无"
         if current_pe is None
         else f"{current_pe:.2f}"
     )
 
-
-    e2.metric(
+    v2.metric(
         "当前PB",
         "暂无"
         if current_pb is None
         else f"{current_pb:.2f}"
     )
 
-
-    e3.metric(
+    v3.metric(
         "中性合理价",
         "暂无"
         if normal_value is None
         else f"{normal_value:.2f} 元"
     )
 
-
-    e4.metric(
+    v4.metric(
         "建仓价",
         "暂无"
         if entry_price is None
@@ -1156,16 +1107,14 @@ if analyze:
 
 
     # =====================================================
-    # 七、同行业比较
+    # 七、同行比较
     # =====================================================
 
     st.header(
         "🏭 七、同行业比较"
     )
 
-
     peer_codes = []
-
 
     if peer_input:
 
@@ -1187,6 +1136,8 @@ if analyze:
                     clean_code
                 )
 
+    peer_score = None
+    peer_rating = "数据不足"
 
     if len(peer_codes) < 2:
 
@@ -1199,25 +1150,19 @@ if analyze:
 
         if len(peer_codes) > 5:
 
-            peer_codes = (
-                peer_codes[:5]
-            )
+            peer_codes = peer_codes[:5]
 
             st.warning(
                 "最多比较5只同行股票。"
             )
 
-
         compare_codes = [
             stock_code
         ] + peer_codes
 
-
         peer_rows = []
 
-
         progress = st.progress(0)
-
 
         for index, code in enumerate(
             compare_codes
@@ -1231,11 +1176,14 @@ if analyze:
                     )
                 )
 
-
                 if data is None:
 
-                    continue
+                    progress.progress(
+                        (index + 1)
+                        / len(compare_codes)
+                    )
 
+                    continue
 
                 peer_realtime = (
                     get_realtime_market(
@@ -1243,11 +1191,8 @@ if analyze:
                     )
                 )
 
-
                 name = code
-
                 price = None
-
 
                 if peer_realtime:
 
@@ -1261,7 +1206,6 @@ if analyze:
                             "最新价"
                         )
                     )
-
 
                 if price is None:
 
@@ -1277,7 +1221,6 @@ if analyze:
                         )
                     )
 
-
                 eps = data.get(
                     "eps"
                 )
@@ -1286,11 +1229,8 @@ if analyze:
                     "bvps"
                 )
 
-
                 pe = None
-
                 pb = None
-
 
                 if (
                     price is not None
@@ -1303,7 +1243,6 @@ if analyze:
                         / eps
                     )
 
-
                 if (
                     price is not None
                     and bvps is not None
@@ -1314,7 +1253,6 @@ if analyze:
                         price
                         / bvps
                     )
-
 
                 peer_rows.append({
 
@@ -1352,44 +1290,31 @@ if analyze:
                     "BPS": bvps
                 })
 
-
             except Exception:
-
                 pass
-
 
             progress.progress(
                 (index + 1)
                 / len(compare_codes)
             )
 
-
         if len(peer_rows) < 2:
 
             st.error(
-                "❌ 有效同行公司不足，无法比较。"
+                "❌ 有效同行公司不足。"
             )
 
         else:
 
-            peer_df = (
-                pd.DataFrame(
-                    peer_rows
-                )
+            peer_df = pd.DataFrame(
+                peer_rows
             )
-
-
-            # -----------------------------------------
-            # 比较表
-            # -----------------------------------------
 
             st.subheader(
                 "📊 同行业核心指标"
             )
 
-
             display_df = peer_df.copy()
-
 
             for col in [
                 "价格",
@@ -1418,29 +1343,21 @@ if analyze:
                         )
                     )
 
-
             st.dataframe(
                 display_df,
                 use_container_width=True,
                 hide_index=True
             )
 
-
-            # -----------------------------------------
-            # 同行平均
-            # -----------------------------------------
-
             st.subheader(
                 "📊 同行平均水平"
             )
-
 
             summary = (
                 build_peer_summary(
                     peer_df
                 )
             )
-
 
             if (
                 summary is not None
@@ -1453,15 +1370,9 @@ if analyze:
                     hide_index=True
                 )
 
-
-            # -----------------------------------------
-            # 目标公司 vs 同行
-            # -----------------------------------------
-
             st.subheader(
                 "🎯 目标公司相对同行"
             )
-
 
             comparison = (
                 compare_target_with_average(
@@ -1470,26 +1381,17 @@ if analyze:
                 )
             )
 
-
             if comparison:
 
-                comparison_df = (
-                    pd.DataFrame(
-                        comparison
-                    )
+                comparison_df = pd.DataFrame(
+                    comparison
                 )
-
 
                 st.dataframe(
                     comparison_df,
                     use_container_width=True,
                     hide_index=True
                 )
-
-
-            # -----------------------------------------
-            # 同行竞争力评分
-            # -----------------------------------------
 
             peer_score_result = (
                 calculate_peer_score(
@@ -1498,206 +1400,40 @@ if analyze:
                 )
             )
 
-
-            ps1, ps2 = st.columns(2)
-
-
-            ps1.metric(
-                "同行竞争力评分",
-                f"{peer_score_result['score']}/100"
+            peer_score = (
+                peer_score_result[
+                    "score"
+                ]
             )
 
-
-            ps2.metric(
-                "同行竞争力评级",
-                peer_score_result["rating"]
+            peer_rating = (
+                peer_score_result[
+                    "rating"
+                ]
             )
 
+            p1, p2 = st.columns(2)
 
-            if (
-                peer_score_result[
-                    "score"
-                ] >= 85
-            ):
+            p1.metric(
+                "同行竞争力",
+                f"{peer_score}/100"
+            )
 
-                st.success(
-                    "🟢 目标公司在输入的同行中竞争力较强。"
-                )
-
-
-            elif (
-                peer_score_result[
-                    "score"
-                ] >= 70
-            ):
-
-                st.info(
-                    "🟡 目标公司在输入的同行中具备较好竞争力。"
-                )
-
-
-            elif (
-                peer_score_result[
-                    "score"
-                ] >= 55
-            ):
-
-                st.warning(
-                    "🟠 目标公司在输入的同行中处于中等水平。"
-                )
-
-
-            else:
-
-                st.error(
-                    "🔴 目标公司在输入的同行中竞争力偏弱。"
-                )
+            p2.metric(
+                "同行评级",
+                peer_rating
+            )
 
 
     # =====================================================
-    # 八、综合投资评级
+    # 八、综合投资价值评分
     # =====================================================
 
     st.header(
-        "🏆 八、综合投资评级"
+        "🏆 八、综合投资价值评分"
     )
-
-
-    financial_component = (
-        financial_quality[
-            "score"
-        ]
-        * 0.30
-    )
-
-
-    profitability_component = 0
-
-
-    if annual_roe is not None:
-
-        if annual_roe >= 20:
-
-            profitability_component = 15
-
-        elif annual_roe >= 15:
-
-            profitability_component = 13
-
-        elif annual_roe >= 10:
-
-            profitability_component = 10
-
-        elif annual_roe >= 5:
-
-            profitability_component = 6
-
-        else:
-
-            profitability_component = 2
-
-
-    growth_component = 0
-
-
-    if (
-        annual_revenue_growth is not None
-        and annual_profit_growth is not None
-    ):
-
-        growth_average = (
-            annual_revenue_growth
-            + annual_profit_growth
-        ) / 2
-
-
-        if growth_average >= 20:
-
-            growth_component = 20
-
-        elif growth_average >= 15:
-
-            growth_component = 17
-
-        elif growth_average >= 10:
-
-            growth_component = 14
-
-        elif growth_average >= 5:
-
-            growth_component = 10
-
-        elif growth_average >= 0:
-
-            growth_component = 6
-
-        else:
-
-            growth_component = 2
-
-
-    cash_component = 0
-
-
-    if (
-        cash_result["ratio"]
-        is not None
-    ):
-
-        ratio = (
-            cash_result["ratio"]
-        )
-
-
-        if ratio >= 1:
-
-            cash_component = 15
-
-        elif ratio >= 0.8:
-
-            cash_component = 13
-
-        elif ratio >= 0.6:
-
-            cash_component = 10
-
-        elif ratio >= 0.3:
-
-            cash_component = 6
-
-        elif ratio >= 0:
-
-            cash_component = 3
-
-
-    safety_component = 0
-
-
-    if annual_debt is not None:
-
-        if annual_debt < 40:
-
-            safety_component = 10
-
-        elif annual_debt < 50:
-
-            safety_component = 9
-
-        elif annual_debt < 60:
-
-            safety_component = 7
-
-        elif annual_debt < 70:
-
-            safety_component = 5
-
-        else:
-
-            safety_component = 2
-
 
     valuation_gap = None
-
 
     if (
         current_price is not None
@@ -1711,127 +1447,101 @@ if analyze:
             - 1
         ) * 100
 
+    investment_result = (
+        calculate_investment_score(
 
-    valuation_component = 0
+            financial_score=(
+                financial_quality[
+                    "score"
+                ]
+            ),
 
+            peer_score=peer_score,
 
-    if valuation_gap is not None:
+            valuation_gap=valuation_gap,
 
-        if valuation_gap >= 30:
-
-            valuation_component = 10
-
-        elif valuation_gap >= 20:
-
-            valuation_component = 9
-
-        elif valuation_gap >= 10:
-
-            valuation_component = 8
-
-        elif valuation_gap >= 0:
-
-            valuation_component = 6
-
-        elif valuation_gap >= -10:
-
-            valuation_component = 4
-
-        elif valuation_gap >= -20:
-
-            valuation_component = 2
-
-
-    if risk_score >= 10:
-
-        risk_penalty = 12
-
-    elif risk_score >= 7:
-
-        risk_penalty = 8
-
-    elif risk_score >= 4:
-
-        risk_penalty = 4
-
-    else:
-
-        risk_penalty = 0
-
-
-    final_score = round(
-        max(
-            0,
-            min(
-                100,
-                financial_component
-                + growth_component
-                + profitability_component
-                + cash_component
-                + safety_component
-                + valuation_component
-                - risk_penalty
-            )
+            risk_score=risk_score
         )
     )
 
-
-    if final_score >= 85:
-
-        rating = (
-            "A：优秀长期价值候选"
-        )
-
-    elif final_score >= 75:
-
-        rating = (
-            "B：优质，值得长期跟踪"
-        )
-
-    elif final_score >= 65:
-
-        rating = (
-            "C：一般，等待更多验证"
-        )
-
-    elif final_score >= 50:
-
-        rating = (
-            "D：谨慎，不适合重仓"
-        )
-
-    else:
-
-        rating = (
-            "E：风险较高"
-        )
-
-
-    c1, c2 = st.columns(2)
-
-
-    c1.metric(
-        "综合评分",
-        f"{final_score}/100"
+    investment_score = (
+        investment_result[
+            "score"
+        ]
     )
 
+    investment_rating = (
+        investment_result[
+            "rating"
+        ]
+    )
 
-    c2.metric(
+    s1, s2 = st.columns(2)
+
+    s1.metric(
+        "投资价值评分",
+        f"{investment_score}/100"
+    )
+
+    s2.metric(
         "投资评级",
-        rating
+        investment_rating
+    )
+
+
+    # -----------------------------------------------------
+    # 分项得分
+    # -----------------------------------------------------
+
+    score_table = pd.DataFrame({
+
+        "分析维度": [
+
+            "财务质量",
+
+            "同行竞争力",
+
+            "当前估值",
+
+            "风险控制"
+
+        ],
+
+        "得分": [
+
+            f"{investment_result['financial_component']:.1f}/30",
+
+            f"{investment_result['peer_component']:.1f}/25",
+
+            f"{investment_result['valuation_component']}/20",
+
+            f"{investment_result['risk_component']}/10"
+
+        ]
+    })
+
+    st.dataframe(
+        score_table,
+        use_container_width=True,
+        hide_index=True
+    )
+
+
+    st.write(
+        "当前估值判断："
+        f"**{investment_result['valuation_level']}**"
     )
 
 
     # =====================================================
-    # 九、投资价格总结
+    # 九、价格区间
     # =====================================================
 
     st.header(
-        "💰 九、投资价格总结"
+        "💰 九、投资价格区间"
     )
 
-
-    price_summary = pd.DataFrame({
+    price_table = pd.DataFrame({
 
         "价格类型": [
 
@@ -1844,6 +1554,7 @@ if analyze:
             "中性合理价",
 
             "乐观估值"
+
         ],
 
         "价格": [
@@ -1861,8 +1572,8 @@ if analyze:
     })
 
 
-    price_summary["价格"] = (
-        price_summary["价格"]
+    price_table["价格"] = (
+        price_table["价格"]
         .apply(
             lambda x:
             "暂无"
@@ -1873,14 +1584,14 @@ if analyze:
 
 
     st.dataframe(
-        price_summary,
+        price_table,
         use_container_width=True,
         hide_index=True
     )
 
 
     # =====================================================
-    # 十、最终结论
+    # 十、最终投资结论
     # =====================================================
 
     st.header(
@@ -1888,39 +1599,39 @@ if analyze:
     )
 
 
-    if final_score >= 85:
+    if investment_score >= 85:
 
         conclusion = (
-            "综合质量优秀，"
-            "具备长期重点研究价值。"
+            "🟢 优质公司 + 估值具有较好吸引力，"
+            "值得进入长期重点研究名单。"
         )
 
-    elif final_score >= 75:
+    elif investment_score >= 75:
 
         conclusion = (
-            "综合质量较好，"
-            "值得长期跟踪，等待合理估值。"
+            "🟢 公司质量较好，当前估值总体合理，"
+            "值得长期跟踪。"
         )
 
-    elif final_score >= 65:
+    elif investment_score >= 65:
 
         conclusion = (
-            "具备一定投资价值，"
-            "但还需要更多验证。"
+            "🟡 公司具备一定价值，"
+            "但建议等待更好的安全边际。"
         )
 
-    elif final_score >= 50:
+    elif investment_score >= 50:
 
         conclusion = (
-            "风险收益比较一般，"
-            "当前不适合重仓。"
+            "🟠 当前投资吸引力一般，"
+            "不宜仅凭单项指标做决定。"
         )
 
     else:
 
         conclusion = (
-            "当前综合质量偏弱，"
-            "不建议作为长期核心资产。"
+            "🔴 当前风险收益比较弱，"
+            "暂不适合作为长期核心资产。"
         )
 
 
@@ -1930,11 +1641,34 @@ if analyze:
 
 
     # =====================================================
-    # 十一、系统诊断
+    # 十一、核心风险
+    # =====================================================
+
+    if risk_result[
+        "risk_items"
+    ]:
+
+        st.subheader(
+            "⚠️ 核心风险"
+        )
+
+        for item in (
+            risk_result[
+                "risk_items"
+            ]
+        ):
+
+            st.write(
+                f"- {item}"
+            )
+
+
+    # =====================================================
+    # 十二、系统诊断
     # =====================================================
 
     st.header(
-        "🛠️ 十一、系统诊断"
+        "🛠️ 十二、系统诊断"
     )
 
 
@@ -1960,9 +1694,7 @@ if analyze:
 
             "peer_compare.py",
 
-            "当前PE",
-
-            "合理价"
+            "investment_score.py"
         ],
 
         "状态": [
@@ -1994,16 +1726,10 @@ if analyze:
             "✅",
 
             "✅"
-            if peer_input
+            if peer_score is not None
             else "⏳",
 
             "✅"
-            if current_pe is not None
-            else "❌",
-
-            "✅"
-            if normal_value is not None
-            else "❌"
         ]
     })
 
@@ -2019,6 +1745,6 @@ st.divider()
 
 
 st.caption(
-    "ValueStock AI V13："
-    "财务 + 风险 + 估值 + 同行业比较。"
+    "ValueStock AI V14："
+    "财务质量 + 财务风险 + 估值 + 同行业竞争力 + 投资价值评分。"
 )
