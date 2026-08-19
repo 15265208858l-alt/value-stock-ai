@@ -1,27 +1,33 @@
 """
 ValueStock AI
-投资价值综合评分模块 V1
+投资价值综合评分模块 V2
 
-功能：
-1. 财务质量评分
-2. 同行竞争力评分
-3. 当前估值评分
-4. 财务风险扣分
-5. 综合投资价值评分
+评分结构：
+
+财务质量       30分
+同行竞争力     25分
+当前估值       20分
+历史估值       15分
+风险控制       10分
+
+总分           100分
 """
 
+
+# =========================================================
+# 1. 当前估值评分
+# =========================================================
 
 def score_current_valuation(
     valuation_gap
 ):
     """
-    根据当前价格相对合理价值的差距评分
+    valuation_gap：
 
-    valuation_gap:
-        例如 +20 表示低于合理价值20%
-        -10 表示高于合理价值10%
-
-    满分20分
+    +30 = 当前价格比合理价值低30%
+    +10 = 当前价格比合理价值低10%
+      0 = 当前价格约等于合理价值
+    -10 = 当前价格比合理价值高10%
     """
 
     if valuation_gap is None:
@@ -86,29 +92,172 @@ def score_current_valuation(
     }
 
 
+# =========================================================
+# 2. 历史估值评分
+# =========================================================
+
+def score_historical_valuation(
+    historical_percentile
+):
+    """
+    根据当前PE在历史PE中的分位进行评分。
+
+    分位越低：
+        历史估值越便宜
+
+    分位越高：
+        历史估值越贵
+
+    满分15分
+    """
+
+    if historical_percentile is None:
+
+        return {
+            "score": 0,
+            "level": "数据不足"
+        }
+
+
+    if historical_percentile <= 20:
+
+        return {
+            "score": 15,
+            "level": "历史低位"
+        }
+
+
+    if historical_percentile <= 40:
+
+        return {
+            "score": 13,
+            "level": "历史中低位"
+        }
+
+
+    if historical_percentile <= 60:
+
+        return {
+            "score": 10,
+            "level": "历史中枢"
+        }
+
+
+    if historical_percentile <= 80:
+
+        return {
+            "score": 6,
+            "level": "历史中高位"
+        }
+
+
+    return {
+        "score": 3,
+        "level": "历史高位"
+    }
+
+
+# =========================================================
+# 3. 风险评分
+# =========================================================
+
+def score_risk(
+    risk_score
+):
+    """
+    风险越低，得到的分数越高。
+
+    满分10分
+    """
+
+    if risk_score is None:
+
+        return {
+            "score": 5,
+            "level": "数据不足"
+        }
+
+
+    if risk_score == 0:
+
+        return {
+            "score": 10,
+            "level": "低风险"
+        }
+
+
+    if risk_score <= 3:
+
+        return {
+            "score": 8,
+            "level": "风险较低"
+        }
+
+
+    if risk_score <= 6:
+
+        return {
+            "score": 6,
+            "level": "需要关注"
+        }
+
+
+    if risk_score <= 9:
+
+        return {
+            "score": 3,
+            "level": "风险较高"
+        }
+
+
+    return {
+        "score": 0,
+        "level": "高风险"
+    }
+
+
+# =========================================================
+# 4. 综合投资评分
+# =========================================================
+
 def calculate_investment_score(
     financial_score,
     peer_score,
     valuation_gap,
-    risk_score
+    risk_score,
+    historical_percentile=None
 ):
     """
-    综合投资价值评分
+    综合投资价值评分。
 
-    财务质量：30分
-    同行竞争力：25分
-    当前估值：20分
-    历史估值预留：15分
-    风险控制：10分
+    参数：
+
+    financial_score：
+        财务质量 0-100
+
+    peer_score：
+        同行竞争力 0-100
+
+    valuation_gap：
+        当前价格相对合理价值空间
+
+    risk_score：
+        财务风险原始评分
+
+    historical_percentile：
+        当前PE历史分位
     """
 
+
     # =====================================================
-    # 1. 财务质量
+    # A. 财务质量 30分
     # =====================================================
 
-    financial_component = 0
+    if financial_score is None:
 
-    if financial_score is not None:
+        financial_component = 0
+
+    else:
 
         financial_component = (
             financial_score
@@ -117,12 +266,14 @@ def calculate_investment_score(
 
 
     # =====================================================
-    # 2. 同行竞争力
+    # B. 同行竞争力 25分
     # =====================================================
 
-    peer_component = 0
+    if peer_score is None:
 
-    if peer_score is not None:
+        peer_component = 0
+
+    else:
 
         peer_component = (
             peer_score
@@ -131,67 +282,73 @@ def calculate_investment_score(
 
 
     # =====================================================
-    # 3. 当前估值
+    # C. 当前估值 20分
     # =====================================================
 
-    valuation_result = (
+    current_result = (
         score_current_valuation(
             valuation_gap
         )
     )
 
-    valuation_component = (
-        valuation_result["score"]
+
+    current_valuation_component = (
+        current_result[
+            "score"
+        ]
     )
 
 
     # =====================================================
-    # 4. 风险评分
+    # D. 历史估值 15分
     # =====================================================
 
-    risk_component = 10
+    historical_result = (
+        score_historical_valuation(
+            historical_percentile
+        )
+    )
 
-    if risk_score is None:
 
-        risk_component = 5
-
-    elif risk_score == 0:
-
-        risk_component = 10
-
-    elif risk_score <= 3:
-
-        risk_component = 8
-
-    elif risk_score <= 6:
-
-        risk_component = 6
-
-    elif risk_score <= 9:
-
-        risk_component = 3
-
-    else:
-
-        risk_component = 0
+    historical_component = (
+        historical_result[
+            "score"
+        ]
+    )
 
 
     # =====================================================
-    # 5. 历史估值暂不计分
+    # E. 风险控制 10分
     # =====================================================
 
-    historical_component = 0
+    risk_result = (
+        score_risk(
+            risk_score
+        )
+    )
+
+
+    risk_component = (
+        risk_result[
+            "score"
+        ]
+    )
 
 
     # =====================================================
-    # 6. 总分
+    # F. 最终总分
     # =====================================================
 
     total_score = (
+
         financial_component
+
         + peer_component
-        + valuation_component
+
+        + current_valuation_component
+
         + historical_component
+
         + risk_component
     )
 
@@ -208,7 +365,7 @@ def calculate_investment_score(
 
 
     # =====================================================
-    # 7. 综合评级
+    # G. 综合评级
     # =====================================================
 
     if total_score >= 85:
@@ -248,11 +405,19 @@ def calculate_investment_score(
 
     return {
 
+        # -------------------------------------------------
+        # 总分
+        # -------------------------------------------------
+
         "score":
             total_score,
 
         "rating":
             rating,
+
+        # -------------------------------------------------
+        # 财务质量
+        # -------------------------------------------------
 
         "financial_component":
             round(
@@ -260,21 +425,55 @@ def calculate_investment_score(
                 1
             ),
 
+        # -------------------------------------------------
+        # 同行竞争力
+        # -------------------------------------------------
+
         "peer_component":
             round(
                 peer_component,
                 1
             ),
 
+        "peer_raw_score":
+            peer_score,
+
+        # -------------------------------------------------
+        # 当前估值
+        # -------------------------------------------------
+
         "valuation_component":
-            valuation_component,
+            current_valuation_component,
+
+        "valuation_level":
+            current_result[
+                "level"
+            ],
+
+        # -------------------------------------------------
+        # 历史估值
+        # -------------------------------------------------
 
         "historical_component":
             historical_component,
 
+        "historical_level":
+            historical_result[
+                "level"
+            ],
+
+        "historical_percentile":
+            historical_percentile,
+
+        # -------------------------------------------------
+        # 风险
+        # -------------------------------------------------
+
         "risk_component":
             risk_component,
 
-        "valuation_level":
-            valuation_result["level"]
+        "risk_level":
+            risk_result[
+                "level"
+            ]
     }
