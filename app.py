@@ -2576,3 +2576,496 @@ if analyze:
         "ValueStock AI V12.2：稳定数据链路 + "
         "财务质量 + 财务排雷 + 三情景估值 + 综合投资评级。"
     )
+# =====================================================
+# V13：历史估值分位分析
+# =====================================================
+
+st.divider()
+
+st.header("📊 V13：历史估值分位")
+
+st.caption(
+    "利用年度EPS与对应年度最后交易日收盘价，"
+    "计算历史PE，用于判断当前估值处于自身历史什么位置。"
+)
+
+
+# =====================================================
+# 1. 准备历史价格
+# =====================================================
+
+historical_pe = pd.DataFrame()
+
+
+if (
+    history is not None
+    and not history.empty
+    and trend is not None
+    and not trend.empty
+):
+
+    price_df = history.copy()
+
+
+    # -------------------------------------------------
+    # 统一日期字段
+    # -------------------------------------------------
+
+    if "日期" in price_df.columns:
+
+        price_df["_日期"] = pd.to_datetime(
+            price_df["日期"],
+            errors="coerce"
+        )
+
+        price_df["_收盘价"] = (
+            price_df["收盘"]
+            .apply(safe_float)
+        )
+
+    elif "date" in price_df.columns:
+
+        price_df["_日期"] = pd.to_datetime(
+            price_df["date"],
+            errors="coerce"
+        )
+
+        price_df["_收盘价"] = (
+            price_df["close"]
+            .apply(safe_float)
+        )
+
+    else:
+
+        price_df = pd.DataFrame()
+
+
+    if not price_df.empty:
+
+        price_df = price_df.dropna(
+            subset=[
+                "_日期",
+                "_收盘价"
+            ]
+        )
+
+
+    # -------------------------------------------------
+    # 获取每年的最后交易日
+    # -------------------------------------------------
+
+    if not price_df.empty:
+
+        price_df["年份"] = (
+            price_df["_日期"].dt.year
+        )
+
+        year_end_price = (
+            price_df
+            .sort_values("_日期")
+            .groupby("年份")
+            .tail(1)
+        )
+
+
+        # -------------------------------------------------
+        # 处理财务趋势数据
+        # -------------------------------------------------
+
+        trend_v13 = trend.copy()
+
+
+        if (
+            "报告期" in trend_v13.columns
+            and "EPS" in trend_v13.columns
+        ):
+
+            trend_v13["_报告日期"] = (
+                pd.to_datetime(
+                    trend_v13["报告期"],
+                    errors="coerce"
+                )
+            )
+
+            trend_v13["年份"] = (
+                trend_v13["_报告日期"]
+                .dt.year
+            )
+
+            trend_v13["EPS"] = (
+                trend_v13["EPS"]
+                .apply(safe_float)
+            )
+
+
+            trend_v13 = trend_v13[
+                [
+                    "年份",
+                    "EPS"
+                ]
+            ].dropna(
+                subset=["EPS"]
+            )
+
+
+            # -------------------------------------------------
+            # 合并年度价格与EPS
+            # -------------------------------------------------
+
+            historical_pe = pd.merge(
+                year_end_price[
+                    [
+                        "年份",
+                        "_日期",
+                        "_收盘价"
+                    ]
+                ],
+                trend_v13,
+                on="年份",
+                how="inner"
+            )
+
+
+            historical_pe = historical_pe[
+                historical_pe["EPS"] > 0
+            ].copy()
+
+
+            if not historical_pe.empty:
+
+                historical_pe["PE"] = (
+                    historical_pe["_收盘价"]
+                    / historical_pe["EPS"]
+                )
+
+
+                historical_pe = (
+                    historical_pe
+                    .sort_values("年份")
+                    .tail(5)
+                )
+
+
+# =====================================================
+# 2. 显示历史PE
+# =====================================================
+
+if (
+    historical_pe is not None
+    and not historical_pe.empty
+):
+
+    display_pe = pd.DataFrame({
+
+        "年份":
+            historical_pe["年份"].astype(str),
+
+        "年末收盘价":
+            historical_pe["_收盘价"].round(2),
+
+        "年度EPS":
+            historical_pe["EPS"].round(2),
+
+        "历史PE":
+            historical_pe["PE"].round(2)
+
+    })
+
+
+    st.subheader(
+        "📅 最近5年历史PE"
+    )
+
+
+    st.dataframe(
+        display_pe,
+        use_container_width=True,
+        hide_index=True
+    )
+
+
+    # =================================================
+    # 3. 历史PE统计
+    # =================================================
+
+    pe_values = (
+        historical_pe["PE"]
+        .dropna()
+        .tolist()
+    )
+
+
+    if len(pe_values) >= 2:
+
+        historical_pe_min = min(
+            pe_values
+        )
+
+        historical_pe_max = max(
+            pe_values
+        )
+
+        historical_pe_median = (
+            pd.Series(pe_values)
+            .median()
+        )
+
+        historical_pe_mean = (
+            pd.Series(pe_values)
+            .mean()
+        )
+
+
+        st.subheader(
+            "📊 历史PE统计"
+        )
+
+
+        h1, h2, h3, h4 = st.columns(4)
+
+
+        h1.metric(
+            "历史最低PE",
+            f"{historical_pe_min:.2f}"
+        )
+
+
+        h2.metric(
+            "历史中位PE",
+            f"{historical_pe_median:.2f}"
+        )
+
+
+        h3.metric(
+            "历史平均PE",
+            f"{historical_pe_mean:.2f}"
+        )
+
+
+        h4.metric(
+            "历史最高PE",
+            f"{historical_pe_max:.2f}"
+        )
+
+
+        # =================================================
+        # 4. 当前PE历史分位
+        # =================================================
+
+        if current_pe is not None:
+
+            lower_count = sum(
+                1
+                for x in pe_values
+                if x <= current_pe
+            )
+
+
+            historical_percentile = (
+                lower_count
+                / len(pe_values)
+                * 100
+            )
+
+
+            st.subheader(
+                "🎯 当前PE历史分位"
+            )
+
+
+            st.metric(
+                "当前PE历史分位",
+                f"{historical_percentile:.1f}%"
+            )
+
+
+            if historical_percentile <= 20:
+
+                st.success(
+                    "🟢 当前估值处于历史偏低区域，"
+                    "安全边际相对较好。"
+                )
+
+
+            elif historical_percentile <= 40:
+
+                st.success(
+                    "🟢 当前估值处于历史中低区域。"
+                )
+
+
+            elif historical_percentile <= 60:
+
+                st.info(
+                    "🟡 当前估值处于历史中枢附近。"
+                )
+
+
+            elif historical_percentile <= 80:
+
+                st.warning(
+                    "🟠 当前估值处于历史中高区域。"
+                )
+
+
+            else:
+
+                st.error(
+                    "🔴 当前估值处于历史高位。"
+                )
+
+
+        # =================================================
+        # 5. 当前PE vs 历史中位数
+        # =================================================
+
+        if current_pe is not None:
+
+            deviation = (
+                current_pe
+                / historical_pe_median
+                - 1
+            ) * 100
+
+
+            st.subheader(
+                "🔍 当前PE与历史中位数比较"
+            )
+
+
+            st.metric(
+                "相对历史中位PE偏离",
+                f"{deviation:.2f}%"
+            )
+
+
+            if deviation <= -20:
+
+                st.success(
+                    "🟢 当前PE明显低于历史中位水平。"
+                )
+
+            elif deviation <= -10:
+
+                st.success(
+                    "🟢 当前PE低于历史中位水平。"
+                )
+
+            elif deviation <= 10:
+
+                st.info(
+                    "🟡 当前PE接近历史估值中枢。"
+                )
+
+            elif deviation <= 20:
+
+                st.warning(
+                    "🟠 当前PE高于历史中位水平。"
+                )
+
+            else:
+
+                st.error(
+                    "🔴 当前PE明显高于历史中位水平。"
+                )
+
+
+else:
+
+    st.warning(
+        "⚠️ 当前数据不足，"
+        "暂时无法建立有效的历史PE序列。"
+    )
+
+
+# =====================================================
+# 6. V13估值结论
+# =====================================================
+
+st.subheader(
+    "🏆 V13历史估值结论"
+)
+
+
+if (
+    historical_pe is not None
+    and not historical_pe.empty
+    and current_pe is not None
+):
+
+    pe_values = (
+        historical_pe["PE"]
+        .dropna()
+        .tolist()
+    )
+
+
+    if len(pe_values) >= 2:
+
+        median_pe = (
+            pd.Series(pe_values)
+            .median()
+        )
+
+
+        percentile = (
+            sum(
+                1
+                for x in pe_values
+                if x <= current_pe
+            )
+            / len(pe_values)
+            * 100
+        )
+
+
+        if percentile <= 20:
+
+            st.success(
+                f"🟢 V13判断：当前PE {current_pe:.2f}倍，"
+                f"处于历史较低区域。"
+            )
+
+
+        elif percentile <= 40:
+
+            st.success(
+                f"🟢 V13判断：当前PE {current_pe:.2f}倍，"
+                f"处于历史中低区域。"
+            )
+
+
+        elif percentile <= 60:
+
+            st.info(
+                f"🟡 V13判断：当前PE {current_pe:.2f}倍，"
+                f"接近历史估值中枢。"
+            )
+
+
+        elif percentile <= 80:
+
+            st.warning(
+                f"🟠 V13判断：当前PE {current_pe:.2f}倍，"
+                f"处于历史中高区域。"
+            )
+
+
+        else:
+
+            st.error(
+                f"🔴 V13判断：当前PE {current_pe:.2f}倍，"
+                f"处于历史高位区域。"
+            )
+
+else:
+
+    st.info(
+        "V13暂时缺少足够的历史EPS/价格配对数据。"
+    )
+
+
+st.caption(
+    "V13说明：历史PE仅用于估值参考。"
+    "周期股、利润波动较大的公司不能机械使用历史PE分位。"
+)
