@@ -1859,138 +1859,200 @@ else:
                 hide_index=True
             )
 
-    # =====================================================
+        # =====================================================
     # 十、综合投资价值评分
     # =====================================================
 
-   st.subheader(
-    "📊 100分综合评分明细"
-)
-
-score_table = pd.DataFrame({
-
-    "分析维度": [
-        "财务质量",
-        "同行竞争力",
-        "当前估值",
-        "历史估值",
-        "风险控制"
-    ],
-
-    "满分": [
-        30,
-        25,
-        20,
-        15,
-        10
-    ],
-
-    "实际得分": [
-        investment_result[
-            "financial_component"
-        ],
-
-        investment_result[
-            "peer_component"
-        ],
-
-        investment_result[
-            "valuation_component"
-        ],
-
-        investment_result[
-            "historical_component"
-        ],
-
-        investment_result[
-            "risk_component"
-        ]
-    ]
-})
-
-st.dataframe(
-    score_table,
-    use_container_width=True,
-    hide_index=True
-)
-
-st.write(
-    "历史估值判断："
-    f"**{investment_result['historical_level']}**"
-)
-
-st.write(
-    "当前估值判断："
-    f"**{investment_result['valuation_level']}**"
-)
-
-st.write(
-    "风险判断："
-    f"**{investment_result['risk_level']}**"
-)
-
-    # =====================================================
-    # 十一、最终投资价格
-    # =====================================================
-
     st.header(
-        "💰 十一、投资价格区间"
+        "🏆 十、综合投资价值评分"
     )
 
 
-    price_table = pd.DataFrame({
-
-        "价格类型": [
-
-            "当前价格",
-
-            "重仓参考价",
-
-            "建仓参考价",
-
-            "中性合理价",
-
-            "乐观估值"
-
-        ],
-
-        "价格": [
-
-            current_price,
-
-            heavy_price,
-
-            entry_price,
-
-            normal_value,
-
-            optimistic_value
-        ]
-    })
+    valuation_gap = None
 
 
-    price_table[
-        "价格"
-    ] = (
-        price_table[
-            "价格"
-        ]
-        .apply(
-            lambda x:
-            "暂无"
-            if x is None
-            else f"{x:.2f} 元"
+    if (
+        current_price is not None
+        and normal_value is not None
+        and normal_value > 0
+    ):
+
+        valuation_gap = (
+            normal_value
+            / current_price
+            - 1
+        ) * 100
+
+
+    # =====================================================
+    # V16.2：完整100分投资评分
+    # =====================================================
+
+    investment_result = (
+        calculate_investment_score(
+
+            financial_score=(
+                financial_quality[
+                    "score"
+                ]
+            ),
+
+            peer_score=peer_score,
+
+            valuation_gap=valuation_gap,
+
+            risk_score=risk_score,
+
+            historical_percentile=(
+                historical_stats[
+                    "percentile"
+                ]
+            )
         )
     )
 
 
+    investment_score = (
+        investment_result[
+            "score"
+        ]
+    )
+
+
+    investment_rating = (
+        investment_result[
+            "rating"
+        ]
+    )
+
+
+    # =====================================================
+    # 总分
+    # =====================================================
+
+    s1, s2 = st.columns(2)
+
+
+    s1.metric(
+        "投资价值评分",
+        f"{investment_score}/100"
+    )
+
+
+    s2.metric(
+        "投资评级",
+        investment_rating
+    )
+
+
+    # =====================================================
+    # 100分明细
+    # =====================================================
+
+    st.subheader(
+        "📊 100分综合评分明细"
+    )
+
+
+    score_table = pd.DataFrame({
+
+        "分析维度": [
+
+            "财务质量",
+
+            "同行竞争力",
+
+            "当前估值",
+
+            "历史估值",
+
+            "风险控制"
+
+        ],
+
+        "满分": [
+
+            30,
+
+            25,
+
+            20,
+
+            15,
+
+            10
+
+        ],
+
+        "实际得分": [
+
+            investment_result[
+                "financial_component"
+            ],
+
+            investment_result[
+                "peer_component"
+            ],
+
+            investment_result[
+                "valuation_component"
+            ],
+
+            investment_result[
+                "historical_component"
+            ],
+
+            investment_result[
+                "risk_component"
+            ]
+        ]
+    })
+
+
     st.dataframe(
-        price_table,
+        score_table,
         use_container_width=True,
         hide_index=True
     )
 
 
+    # =====================================================
+    # 同行原始评分
+    # =====================================================
+
+    if peer_score is not None:
+
+        st.write(
+            f"**同行竞争力原始评分："
+            f"{peer_score}/100**"
+        )
+
+        st.write(
+            f"**同行对综合评分贡献："
+            f"{investment_result['peer_component']:.1f}/25**"
+        )
+
+
+    # =====================================================
+    # 估值与风险判断
+    # =====================================================
+
+    st.write(
+        "当前估值判断："
+        f"**{investment_result['valuation_level']}**"
+    )
+
+
+    st.write(
+        "历史估值判断："
+        f"**{investment_result['historical_level']}**"
+    )
+
+
+    st.write(
+        "风险判断："
+        f"**{investment_result['risk_level']}**"
+    )
     # =====================================================
     # 十二、最终投资结论
     # =====================================================
