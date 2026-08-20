@@ -1891,6 +1891,7 @@ else:
     investment_result = (
         calculate_investment_score(
 
+            
             financial_score=(
                 financial_quality[
                     "score"
