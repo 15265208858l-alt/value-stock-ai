@@ -1362,181 +1362,149 @@ if analyze:
         )
 
 
-   # =====================================================
-# 九、同行业比较 V16.1
-# =====================================================
-peer_score = None
-st.header(
-    "🏭 九、同行业比较"
-)
+       # =====================================================
+    # 九、同行业比较 V16.1
+    # =====================================================
 
-
-# =====================================================
-# 1. 自动寻找同行
-# =====================================================
-
-auto_peer_result = (
-    get_peer_candidates(
-        stock_code,
-        max_peers=5
-    )
-)
-
-
-auto_industry = (
-    auto_peer_result.get(
-        "industry"
-    )
-)
-
-
-auto_peers = (
-    auto_peer_result.get(
-        "peers",
-        []
-    )
-)
-
-
-# =====================================================
-# 2. 判断是否需要手动同行
-# =====================================================
-
-if auto_peers:
-
-    st.success(
-        f"✅ 自动识别同行成功："
-        f"{auto_industry}"
-    )
-
-    st.write(
-        "自动同行股票："
-        + "、".join(auto_peers)
-    )
-
-    peer_codes = auto_peers
-
-
-else:
-
-    st.warning(
-        "⚠️ 自动同行识别暂时失败，"
-        "使用手动同行股票。"
-    )
-
-    peer_codes = []
-
-
-    if peer_input:
-
-        for code in peer_input.split(","):
-
-            clean_code = (
-                clean_stock_code(
-                    code
-                )
-            )
-
-            if (
-                clean_code
-                and clean_code != stock_code
-                and clean_code not in peer_codes
-            ):
-
-                peer_codes.append(
-                    clean_code
-                )
-
-
-# =====================================================
-# 3. 限制同行数量
-# =====================================================
-
-if len(peer_codes) > 5:
-
-    peer_codes = peer_codes[:5]
-
-    st.info(
-        "同行最多比较5家公司，"
-        "已自动取前5家。"
+    st.header(
+        "🏭 九、同行业比较"
     )
 
 
-# =====================================================
-# 4. 开始同行比较
-# =====================================================
+    # =====================================================
+    # 1. 自动寻找同行
+    # =====================================================
 
-peer_score = None
-peer_rating = "数据不足"
-
-
-if len(peer_codes) < 2:
-
-    st.warning(
-        "⚠️ 当前没有足够的同行公司。"
-        "可以在上方手动输入2～5只同行股票。"
+    auto_peer_result = (
+        get_peer_candidates(
+            stock_code,
+            max_peers=5
+        )
     )
 
 
-else:
-
-    compare_codes = [
-        stock_code
-    ] + peer_codes
-
-
-    peer_rows = []
+    auto_industry = (
+        auto_peer_result.get(
+            "industry"
+        )
+    )
 
 
-    progress = st.progress(0)
+    auto_peers = (
+        auto_peer_result.get(
+            "peers",
+            []
+        )
+    )
 
 
-    for index, code in enumerate(
-        compare_codes
-    ):
+    # =====================================================
+    # 2. 判断是否需要手动同行
+    # =====================================================
 
-        try:
+    if auto_peers:
 
-            data = (
-                get_company_annual_data(
-                    code
-                )
-            )
+        st.success(
+            f"✅ 自动识别同行成功："
+            f"{auto_industry}"
+        )
 
+        st.write(
+            "自动同行股票："
+            + "、".join(auto_peers)
+        )
 
-            if data is None:
-
-                progress.progress(
-                    (index + 1)
-                    / len(compare_codes)
-                )
-
-                continue
+        peer_codes = auto_peers
 
 
-            # -------------------------------------------------
-            # 获取行情
-            # -------------------------------------------------
+    else:
 
-            if code == stock_code:
+        st.warning(
+            "⚠️ 自动同行识别暂时失败，"
+            "使用手动同行股票。"
+        )
 
-                peer_market = (
-                    stock_data["market"]
-                )
+        peer_codes = []
 
-                peer_history = (
-                    stock_data["history"]
-                )
 
-            else:
+        if peer_input:
 
-                peer_stock_data = (
-                    load_stock_data(
+            for code in peer_input.split(","):
+
+                clean_code = (
+                    clean_stock_code(
                         code
                     )
                 )
 
-                if peer_stock_data is None:
+                if (
+                    clean_code
+                    and clean_code != stock_code
+                    and clean_code not in peer_codes
+                ):
+
+                    peer_codes.append(
+                        clean_code
+                    )
+
+
+    # =====================================================
+    # 3. 限制同行数量
+    # =====================================================
+
+    if len(peer_codes) > 5:
+
+        peer_codes = peer_codes[:5]
+
+        st.info(
+            "同行最多比较5家公司，"
+            "已自动取前5家。"
+        )
+
+
+    # =====================================================
+    # 4. 开始同行比较
+    # =====================================================
+
+    peer_score = None
+    peer_rating = "数据不足"
+
+
+    if len(peer_codes) < 2:
+
+        st.warning(
+            "⚠️ 当前没有足够的同行公司。"
+            "可以在上方手动输入2～5只同行股票。"
+        )
+
+
+    else:
+
+        compare_codes = [
+            stock_code
+        ] + peer_codes
+
+
+        peer_rows = []
+
+
+        progress = st.progress(0)
+
+
+        for index, code in enumerate(
+            compare_codes
+        ):
+
+            try:
+
+                data = (
+                    get_company_annual_data(
+                        code
+                    )
+                )
+
+
+                if data is None:
 
                     progress.progress(
                         (index + 1)
@@ -1546,325 +1514,357 @@ else:
                     continue
 
 
-                peer_market = (
-                    peer_stock_data[
-                        "market"
-                    ]
-                )
+                # -------------------------------------------------
+                # 获取行情
+                # -------------------------------------------------
 
-                peer_history = (
-                    peer_stock_data[
-                        "history"
-                    ]
-                )
+                if code == stock_code:
 
-
-            name = code
-            price = None
-
-
-            if peer_market:
-
-                name = peer_market.get(
-                    "名称",
-                    code
-                )
-
-                price = safe_float(
-                    peer_market.get(
-                        "最新价"
+                    peer_market = (
+                        stock_data["market"]
                     )
-                )
 
-
-            if price is None:
-
-                price = (
-                    get_latest_price(
-                        peer_history
+                    peer_history = (
+                        stock_data["history"]
                     )
-                )
 
+                else:
 
-            eps = data.get(
-                "eps"
-            )
-
-            bvps = data.get(
-                "bvps"
-            )
-
-
-            pe = None
-            pb = None
-
-
-            if (
-                price is not None
-                and eps is not None
-                and eps > 0
-            ):
-
-                pe = (
-                    price
-                    / eps
-                )
-
-
-            if (
-                price is not None
-                and bvps is not None
-                and bvps > 0
-            ):
-
-                pb = (
-                    price
-                    / bvps
-                )
-
-
-            peer_rows.append({
-
-                "代码": code,
-
-                "名称": name,
-
-                "价格": price,
-
-                "ROE": data.get(
-                    "roe"
-                ),
-
-                "营收增长率":
-                    data.get(
-                        "revenue_growth"
-                    ),
-
-                "净利润增长率":
-                    data.get(
-                        "profit_growth"
-                    ),
-
-                "资产负债率":
-                    data.get(
-                        "debt"
-                    ),
-
-                "PE": pe,
-
-                "PB": pb
-
-            })
-
-
-        except Exception as e:
-
-            st.warning(
-                f"{code} 同行数据获取失败。"
-            )
-
-
-        progress.progress(
-            (index + 1)
-            / len(compare_codes)
-        )
-
-
-    # =====================================================
-    # 5. 输出同行结果
-    # =====================================================
-
-    if len(peer_rows) < 2:
-
-        st.error(
-            "❌ 有效同行公司数量不足，"
-            "无法进行同行比较。"
-        )
-
-
-    else:
-
-        peer_df = pd.DataFrame(
-            peer_rows
-        )
-
-
-        # -------------------------------------------------
-        # 核心指标
-        # -------------------------------------------------
-
-        st.subheader(
-            "📊 同行业核心指标"
-        )
-
-
-        display_peer = (
-            peer_df.copy()
-        )
-
-
-        for column in [
-            "价格",
-            "ROE",
-            "营收增长率",
-            "净利润增长率",
-            "资产负债率",
-            "PE",
-            "PB"
-        ]:
-
-
-            if column in display_peer.columns:
-
-                display_peer[
-                    column
-                ] = (
-                    display_peer[
-                        column
-                    ]
-                    .apply(
-                        lambda x:
-                        "暂无"
-                        if pd.isna(x)
-                        else round(
-                            float(x),
-                            2
+                    peer_stock_data = (
+                        load_stock_data(
+                            code
                         )
                     )
+
+                    if peer_stock_data is None:
+
+                        progress.progress(
+                            (index + 1)
+                            / len(compare_codes)
+                        )
+
+                        continue
+
+
+                    peer_market = (
+                        peer_stock_data[
+                            "market"
+                        ]
+                    )
+
+                    peer_history = (
+                        peer_stock_data[
+                            "history"
+                        ]
+                    )
+
+
+                name = code
+                price = None
+
+
+                if peer_market:
+
+                    name = peer_market.get(
+                        "名称",
+                        code
+                    )
+
+                    price = safe_float(
+                        peer_market.get(
+                            "最新价"
+                        )
+                    )
+
+
+                if price is None:
+
+                    price = (
+                        get_latest_price(
+                            peer_history
+                        )
+                    )
+
+
+                eps = data.get(
+                    "eps"
+                )
+
+                bvps = data.get(
+                    "bvps"
                 )
 
 
-        st.dataframe(
-            display_peer,
-            use_container_width=True,
-            hide_index=True
-        )
+                pe = None
+                pb = None
 
 
-        # -------------------------------------------------
-        # 同行平均
-        # -------------------------------------------------
+                if (
+                    price is not None
+                    and eps is not None
+                    and eps > 0
+                ):
 
-        summary = (
-            build_peer_summary(
-                peer_df
+                    pe = (
+                        price
+                        / eps
+                    )
+
+
+                if (
+                    price is not None
+                    and bvps is not None
+                    and bvps > 0
+                ):
+
+                    pb = (
+                        price
+                        / bvps
+                    )
+
+
+                peer_rows.append({
+
+                    "代码": code,
+
+                    "名称": name,
+
+                    "价格": price,
+
+                    "ROE": data.get(
+                        "roe"
+                    ),
+
+                    "营收增长率":
+                        data.get(
+                            "revenue_growth"
+                        ),
+
+                    "净利润增长率":
+                        data.get(
+                            "profit_growth"
+                        ),
+
+                    "资产负债率":
+                        data.get(
+                            "debt"
+                        ),
+
+                    "PE": pe,
+
+                    "PB": pb
+
+                })
+
+
+            except Exception as e:
+
+                st.warning(
+                    f"{code} 同行数据获取失败。"
+                )
+
+
+            progress.progress(
+                (index + 1)
+                / len(compare_codes)
             )
-        )
 
 
-        if (
-            summary is not None
-            and not summary.empty
-        ):
+        # =====================================================
+        # 5. 输出同行结果
+        # =====================================================
+
+        if len(peer_rows) < 2:
+
+            st.error(
+                "❌ 有效同行公司数量不足，"
+                "无法进行同行比较。"
+            )
+
+
+        else:
+
+            peer_df = pd.DataFrame(
+                peer_rows
+            )
+
+
+            # -------------------------------------------------
+            # 核心指标
+            # -------------------------------------------------
 
             st.subheader(
-                "📊 同行平均水平"
+                "📊 同行业核心指标"
             )
+
+
+            display_peer = (
+                peer_df.copy()
+            )
+
+
+            for column in [
+                "价格",
+                "ROE",
+                "营收增长率",
+                "净利润增长率",
+                "资产负债率",
+                "PE",
+                "PB"
+            ]:
+
+
+                if column in display_peer.columns:
+
+                    display_peer[
+                        column
+                    ] = (
+                        display_peer[
+                            column
+                        ]
+                        .apply(
+                            lambda x:
+                            "暂无"
+                            if pd.isna(x)
+                            else round(
+                                float(x),
+                                2
+                            )
+                        )
+                    )
 
 
             st.dataframe(
-                summary,
+                display_peer,
                 use_container_width=True,
                 hide_index=True
             )
 
 
-        # -------------------------------------------------
-        # 目标公司与同行比较
-        # -------------------------------------------------
+            # -------------------------------------------------
+            # 同行平均
+            # -------------------------------------------------
 
-        comparison = (
-            compare_target_with_average(
-                peer_df,
-                stock_code
-            )
-        )
-
-
-        if comparison:
-
-            st.subheader(
-                "🎯 目标公司相对同行"
+            summary = (
+                build_peer_summary(
+                    peer_df
+                )
             )
 
 
-            st.dataframe(
-                pd.DataFrame(
-                    comparison
-                ),
-                use_container_width=True,
-                hide_index=True
+            if (
+                summary is not None
+                and not summary.empty
+            ):
+
+                st.subheader(
+                    "📊 同行平均水平"
+                )
+
+
+                st.dataframe(
+                    summary,
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+
+            # -------------------------------------------------
+            # 目标公司与同行比较
+            # -------------------------------------------------
+
+            comparison = (
+                compare_target_with_average(
+                    peer_df,
+                    stock_code
+                )
             )
 
 
-        # -------------------------------------------------
-        # 同行竞争力
-        # -------------------------------------------------
+            if comparison:
 
-        peer_score_result = (
-            calculate_peer_score(
-                peer_df,
-                stock_code
-            )
-        )
+                st.subheader(
+                    "🎯 目标公司相对同行"
+                )
 
 
-        peer_score = (
-            peer_score_result[
-                "score"
-            ]
-        )
+                st.dataframe(
+                    pd.DataFrame(
+                        comparison
+                    ),
+                    use_container_width=True,
+                    hide_index=True
+                )
 
 
-        peer_rating = (
-            peer_score_result[
-                "rating"
-            ]
-        )
+            # -------------------------------------------------
+            # 同行竞争力
+            # -------------------------------------------------
 
-
-        p1, p2 = st.columns(2)
-
-
-        p1.metric(
-            "同行竞争力",
-            f"{peer_score}/100"
-        )
-
-
-        p2.metric(
-            "同行评级",
-            peer_rating
-        )
-
-
-        # -------------------------------------------------
-        # 同行评分明细
-        # -------------------------------------------------
-
-        if peer_score_result[
-            "details"
-        ]:
-
-            st.subheader(
-                "📋 同行评分明细"
+            peer_score_result = (
+                calculate_peer_score(
+                    peer_df,
+                    stock_code
+                )
             )
 
 
-            detail_df = pd.DataFrame(
+            peer_score = (
                 peer_score_result[
-                    "details"
+                    "score"
                 ]
             )
 
 
-            st.dataframe(
-                detail_df,
-                use_container_width=True,
-                hide_index=True
+            peer_rating = (
+                peer_score_result[
+                    "rating"
+                ]
             )
 
-        # =====================================================
+
+            p1, p2 = st.columns(2)
+
+
+            p1.metric(
+                "同行竞争力",
+                f"{peer_score}/100"
+            )
+
+
+            p2.metric(
+                "同行评级",
+                peer_rating
+            )
+
+
+            # -------------------------------------------------
+            # 同行评分明细
+            # -------------------------------------------------
+
+            if peer_score_result[
+                "details"
+            ]:
+
+                st.subheader(
+                    "📋 同行评分明细"
+                )
+
+
+                detail_df = pd.DataFrame(
+                    peer_score_result[
+                        "details"
+                    ]
+                )
+
+
+                st.dataframe(
+                    detail_df,
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+            # =====================================================
     # 十、综合投资价值评分
     # =====================================================
 
@@ -2296,4 +2296,3 @@ st.caption(
     "ValueStock AI V16："
     "统一数据中心 + 财务 + 风险 + 估值 + "
     "历史估值 + 同行业比较 + 综合投资价值评分。"
-)
