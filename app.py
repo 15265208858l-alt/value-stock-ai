@@ -36,6 +36,11 @@ from peer_compare import (
 from investment_score import (
     calculate_investment_score
 )
+
+from investment_decision import (
+    make_investment_decision
+)
+
 from industry import (
     get_peer_candidates
 )
@@ -1891,7 +1896,6 @@ else:
     investment_result = (
         calculate_investment_score(
 
-            
             financial_score=(
                 financial_quality[
                     "score"
@@ -1909,6 +1913,28 @@ else:
                     "percentile"
                 ]
             )
+        )
+    )
+
+
+    # =====================================================
+    # V16.4：最终投资决策
+    # =====================================================
+
+    decision_result = (
+        make_investment_decision(
+            investment_score=investment_result[
+                "score"
+            ],
+            valuation_level=investment_result[
+                "valuation_level"
+            ],
+            historical_level=investment_result[
+                "historical_level"
+            ],
+            risk_level=investment_result[
+                "risk_level"
+            ]
         )
     )
 
@@ -2055,6 +2081,45 @@ else:
         f"**{investment_result['risk_level']}**"
     )
     # =====================================================
+    # 十一、最终投资决策 V16.4
+    # =====================================================
+
+    st.header(
+        "🎯 十一、最终投资决策"
+    )
+
+    d1, d2, d3 = st.columns(3)
+
+    d1.metric(
+        "投资决策",
+        decision_result[
+            "decision"
+        ]
+    )
+
+    d2.metric(
+        "建议操作",
+        decision_result[
+            "action"
+        ]
+    )
+
+    d3.metric(
+        "建议仓位",
+        decision_result[
+            "position"
+        ]
+    )
+
+    st.info(
+        "💡 决策理由："
+        + decision_result[
+            "reason"
+        ]
+    )
+
+
+    # =====================================================
     # 十二、最终投资结论
     # =====================================================
 
@@ -2163,7 +2228,9 @@ else:
 
             "peer_compare.py",
 
-            "investment_score.py"
+            "investment_score.py",
+
+            "investment_decision.py"
 
         ],
 
@@ -2207,6 +2274,8 @@ else:
             "✅"
             if peer_score is not None
             else "⏳",
+
+            "✅",
 
             "✅"
         ]
