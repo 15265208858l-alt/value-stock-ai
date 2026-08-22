@@ -1,13 +1,12 @@
 """
 ValueStock AI
-前瞻盈利基础模块 V16.7
+前瞻盈利基础模块 V16.8
 
 目标：
-1. 从已有财务指标中提取年度EPS、最新报告期EPS。
-2. 在数据足够时计算TTM EPS：
-   TTM EPS = 最近完整年度EPS + 最新报告期EPS - 上年同期EPS
-3. 对成长科技公司优先使用TTM EPS作为估值分母，减少历史年度EPS滞后造成的系统性高估PE。
-4. 不直接伪造未来利润预测；Forward EPS只作为观察指标，并标注为“年化推算”。
+1. 计算年度 EPS、TTM EPS、年化 EPS。
+2. 增加“正常化 EPS”概念，避免高速成长或单期异常利润直接被资本化。
+3. 引入盈利兑现系数：经营现金流、利润增长、数据完整性越好，正常化折扣越小。
+4. 不把预测 EPS 当成已实现事实；Forward EPS 仅作为观察值。
 """
 
 from __future__ import annotations
@@ -36,8 +35,72 @@ def _find_column(df, candidates):
     return None
 
 
-def build_earnings_basis(indicators, annual_eps=None):
-    """从原始财务指标构建估值盈利基础。"""
+def calculate_earnings_realization_score(
+    operating_cashflow_ratio=None,
+    profit_growth=None,
+    data_confidence="低",
+):
+    """计算盈利兑现系数（0.55～0.98）。"""
+
+    score = 70.0
+    cash_ratio = _safe_float(operating_cashflow_ratio)
+    growth = _safe_float(profit_growth)
+
+    if cash_ratio is not None:
+        if cash_ratio >= 1.00:
+            score += 18
+        elif cash_ratio >= 0.80:
+            score += 12
+        elif cash_ratio >= 0.60:
+            score += 5
+        elif cash_ratio >= 0.40:
+            score -= 5
+        else:
+            score -= 15
+    else:
+        score -= 8
+
+    if growth is not None:
+        if growth >= 80:
+            score -= 6
+        elif growth >= 50:
+            score -= 3
+        elif growth >= 30:
+            score -= 1
+        elif growth >= 10:
+            score += 2
+        elif growth < 0:
+            score -= 5
+
+    if data_confidence == "高":
+        score += 4
+    elif data_confidence == "低":
+        score -= 6
+
+    score = max(40.0, min(95.0, score))
+    coefficient = 0.55 + (score / 100.0) * 0.43
+
+    if score >= 80:
+        level = "高"
+    elif score >= 65:
+        level = "中"
+    else:
+        level = "低"
+
+    return {
+        "score": round(score),
+        "coefficient": round(coefficient, 3),
+        "level": level,
+    }
+
+
+def build_earnings_basis(
+    indicators,
+    annual_eps=None,
+    operating_cashflow_ratio=None,
+    profit_growth=None,
+):
+    """构建估值盈利基础。"""
 
     result = {
         "annual_eps": _safe_float(annual_eps),
@@ -45,18 +108,32 @@ def build_earnings_basis(indicators, annual_eps=None):
         "prior_same_period_eps": None,
         "ttm_eps": None,
         "forward_eps_annualized": None,
+        "normalized_eps": _safe_float(annual_eps),
         "valuation_eps": _safe_float(annual_eps),
         "basis": "FY年度EPS",
         "confidence": "低",
+        "realization_score": None,
+        "realization_coefficient": None,
+        "realization_level": "低",
         "note": "数据不足，暂使用最近完整年度EPS。",
     }
 
     if indicators is None or indicators.empty:
+        realization = calculate_earnings_realization_score(
+            operating_cashflow_ratio,
+            profit_growth,
+            "低",
+        )
+        result.update({
+            "realization_score": realization["score"],
+            "realization_coefficient": realization["coefficient"],
+            "realization_level": realization["level"],
+        })
         return result
 
     date_col = _find_column(
         indicators,
-        ["日期", "报告期", "报告日期", "截止日期", "REPORT_DATE"]
+        ["日期", "报告期", "报告日期", "截止日期", "REPORT_DATE"],
     )
     eps_col = _find_column(
         indicators,
@@ -68,7 +145,7 @@ def build_earnings_basis(indicators, annual_eps=None):
             "每股收益(元)",
             "每股收益",
             "EPSJB",
-        ]
+        ],
     )
 
     if date_col is None or eps_col is None:
@@ -77,27 +154,24 @@ def build_earnings_basis(indicators, annual_eps=None):
     df = indicators[[date_col, eps_col]].copy()
     df["_date"] = pd.to_datetime(df[date_col], errors="coerce")
     df["_eps"] = df[eps_col].apply(_safe_float)
-    df = df.dropna(subset=["_date"]).sort_values("_date").reset_index(drop=True)
+    df = df.dropna(subset=["_date", "_eps"]).sort_values("_date").reset_index(drop=True)
 
     if df.empty:
         return result
 
     latest = df.iloc[-1]
     latest_date = latest["_date"]
-    latest_eps = _safe_float(latest["_eps"])
-    result["latest_eps"] = latest_eps
+    result["latest_eps"] = _safe_float(latest["_eps"])
 
-    # 年度EPS：优先取最近12月报告期。
     annual_df = df[df["_date"].dt.month == 12].copy()
     if not annual_df.empty:
         annual_latest = annual_df.iloc[-1]
-        annual_eps_value = _safe_float(annual_latest["_eps"])
-        if annual_eps_value is not None:
-            result["annual_eps"] = annual_eps_value
+        annual_value = _safe_float(annual_latest["_eps"])
+        if annual_value is not None:
+            result["annual_eps"] = annual_value
 
     annual_eps_value = result["annual_eps"]
 
-    # 上年同期：同月份优先；找不到时允许按季度附近匹配。
     prior = df[
         (df["_date"].dt.year == latest_date.year - 1)
         & (df["_date"].dt.month == latest_date.month)
@@ -116,26 +190,49 @@ def build_earnings_basis(indicators, annual_eps=None):
 
     if (
         annual_eps_value is not None
-        and latest_eps is not None
+        and result["latest_eps"] is not None
         and prior_eps is not None
         and latest_date.month != 12
     ):
-        ttm_eps = annual_eps_value + latest_eps - prior_eps
+        ttm_eps = annual_eps_value + result["latest_eps"] - prior_eps
         if ttm_eps > 0:
             result["ttm_eps"] = ttm_eps
-            result["valuation_eps"] = ttm_eps
             result["basis"] = "TTM EPS"
             result["confidence"] = "高"
-            result["note"] = "已使用最近12个月TTM EPS作为估值分母，降低年度EPS滞后影响。"
 
-    # 年化推算只用于观察，不直接作为主估值分母。
-    if latest_eps is not None:
+    if result["latest_eps"] is not None:
         month = int(latest_date.month)
-        multiplier_map = {3: 4.0, 6: 2.0, 9: 4.0 / 3.0, 12: 1.0}
-        multiplier = multiplier_map.get(month)
+        multiplier = {3: 4.0, 6: 2.0, 9: 4.0 / 3.0, 12: 1.0}.get(month)
         if multiplier is not None:
-            annualized = latest_eps * multiplier
+            annualized = result["latest_eps"] * multiplier
             if annualized > 0:
                 result["forward_eps_annualized"] = annualized
+
+    base_eps = result["ttm_eps"] or result["annual_eps"]
+
+    realization = calculate_earnings_realization_score(
+        operating_cashflow_ratio=operating_cashflow_ratio,
+        profit_growth=profit_growth,
+        data_confidence=result["confidence"],
+    )
+
+    result["realization_score"] = realization["score"]
+    result["realization_coefficient"] = realization["coefficient"]
+    result["realization_level"] = realization["level"]
+
+    if base_eps is not None and base_eps > 0:
+        annual_base = result["annual_eps"] or base_eps
+        normalized = (
+            base_eps * realization["coefficient"]
+            + annual_base * (1.0 - realization["coefficient"])
+        )
+        if normalized > 0:
+            result["normalized_eps"] = normalized
+            result["valuation_eps"] = normalized
+            result["basis"] = "正常化EPS"
+            result["note"] = (
+                "估值分母采用TTM/年度EPS与盈利兑现系数加权后的正常化EPS；"
+                "Forward EPS仅作为观察指标。"
+            )
 
     return result
