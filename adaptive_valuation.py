@@ -1,12 +1,13 @@
 """
 ValueStock AI
-行业自适应估值引擎 V16.6
+行业自适应估值引擎 V16.6.1
 
 核心升级：
 1. 普通公司、银行、保险、券商、周期股继续使用差异化估值。
-2. 新增“成长科技”模型，避免用成熟制造业的低PE参数系统性压低科技成长股估值。
-3. 科技模型采用“成长溢价版 PE + PB”作为第一阶段模型；尚未虚构未来利润，因此不直接用未经验证的PEG给出极高目标价。
-4. 数据不足时自动回退，不让估值模块导致程序中断。
+2. 新增并强化“成长科技”模型，避免用成熟制造业的低PE参数系统性压低科技成长股估值。
+3. 科技模型采用“成长溢价版 PE + PB”作为第一阶段模型。
+4. 自动识别增加科创板（688）科技成长代码兜底，并扩充重点科技股代码库。
+5. 数据不足时自动回退，不让估值模块导致程序中断。
 """
 
 
@@ -16,6 +17,8 @@ def _contains(text, keywords):
 
 
 def detect_valuation_model(industry=None, market_industry=None, stock_code=None, override="自动识别"):
+    """返回估值模型类别。优先手动覆盖，其次行业文本，最后做代码兜底。"""
+
     override_map = {
         "普通成长/制造": "general",
         "银行": "bank",
@@ -30,11 +33,12 @@ def detect_valuation_model(industry=None, market_industry=None, stock_code=None,
 
     text = f"{industry or ''} {market_industry or ''}"
 
+    # 科技成长优先于普通制造识别
     if _contains(text, [
         "半导体", "芯片", "电子", "光通信", "通信设备", "通信服务",
         "AI", "人工智能", "算力", "机器人", "软件", "计算机",
         "云计算", "数据中心", "自动化", "消费电子", "信息技术",
-        "元器件", "集成电路"
+        "元器件", "集成电路", "IT", "互联网", "数字经济"
     ]):
         return "growth_tech"
 
@@ -53,7 +57,7 @@ def detect_valuation_model(industry=None, market_industry=None, stock_code=None,
     ]):
         return "cyclical"
 
-    code = str(stock_code or "")
+    code = str(stock_code or "").strip()
 
     insurance_codes = {"601318", "601336", "601601", "000627", "000628"}
     bank_codes = {
@@ -67,10 +71,18 @@ def detect_valuation_model(industry=None, market_industry=None, stock_code=None,
         "601555", "601688", "601878", "601881", "601901", "601995"
     }
 
+    # 重点科技成长代码：半导体 / 光通信 / AI算力 / 软件 / 机器人
     growth_tech_codes = {
+        # 光通信 / 通信 / 算力
         "300308", "300502", "300394", "000938", "000977", "601138", "688041", "603019",
+        "603516", "600845", "600570", "600588", "600728",
+        # 半导体 / 芯片
         "688981", "688256", "688008", "688126", "002371", "002156", "688036",
-        "688111", "002230", "300454", "300496", "300124", "688017", "002747"
+        "600584", "600460", "603986", "688099", "688012", "688019", "688498",
+        # 软件 / AI应用
+        "688111", "002230", "300454", "300496", "300674", "300017", "002153",
+        # 机器人 / 自动化
+        "300124", "688017", "002747", "002472", "300024", "601127"
     }
 
     if code in insurance_codes:
@@ -82,11 +94,17 @@ def detect_valuation_model(industry=None, market_industry=None, stock_code=None,
     if code in growth_tech_codes:
         return "growth_tech"
 
+    # 科创板整体以科技成长为主，作为数据接口行业字段缺失时的兜底。
+    # 对少数明显属于非科技行业的688公司，后续可加入反向覆盖清单。
+    if code.startswith("688"):
+        return "growth_tech"
+
     return "general"
 
 
 def get_valuation_config(model, annual_roe=None):
-    # 成长科技：第一阶段成长溢价 PE + PB
+    """返回模型参数，供 calculate_valuation_scenarios 直接使用。"""
+
     if model == "growth_tech":
         if annual_roe is not None and annual_roe >= 20:
             pe_c, pe_n, pe_o = 22.0, 30.0, 40.0
@@ -113,7 +131,7 @@ def get_valuation_config(model, annual_roe=None):
             "optimistic_pb": pb_o,
             "pe_weight": 0.80,
             "pb_weight": 0.20,
-            "note": "V16.6第一阶段科技成长模型：提高成长公司的合理PE区间，但尚未直接使用未经验证的未来利润/PEG，因此不会无限抬高目标价。",
+            "note": "V16.6.1科技成长模型：提高成长公司的合理PE区间，但尚未直接使用未经验证的未来利润/PEG，因此不会无限抬高目标价。"
         }
 
     if model == "insurance":
@@ -129,7 +147,7 @@ def get_valuation_config(model, annual_roe=None):
             "optimistic_pb": 1.15,
             "pe_weight": 0.15,
             "pb_weight": 0.85,
-            "note": "保险公司估值应重点参考PB、内含价值和新业务价值；当前版本尚未接入EV/NBV，因此仅作为初版估值。",
+            "note": "保险公司估值应重点参考PB、内含价值和新业务价值；当前版本尚未接入EV/NBV，因此仅作为初版估值。"
         }
 
     if model == "bank":
@@ -145,7 +163,7 @@ def get_valuation_config(model, annual_roe=None):
             "optimistic_pb": 0.95,
             "pe_weight": 0.15,
             "pb_weight": 0.85,
-            "note": "银行业更关注ROE、资产质量、PB及股息率，不能直接套用普通制造业PE。",
+            "note": "银行业更关注ROE、资产质量、PB及股息率，不能直接套用普通制造业PE。"
         }
 
     if model == "broker":
@@ -161,7 +179,7 @@ def get_valuation_config(model, annual_roe=None):
             "optimistic_pb": 1.5,
             "pe_weight": 0.35,
             "pb_weight": 0.65,
-            "note": "券商利润具有明显周期性，PB和资本金回报率通常比单年PE更有参考意义。",
+            "note": "券商利润具有明显周期性，PB和资本金回报率通常比单年PE更有参考意义。"
         }
 
     if model == "cyclical":
@@ -177,7 +195,7 @@ def get_valuation_config(model, annual_roe=None):
             "optimistic_pb": 1.7,
             "pe_weight": 0.40,
             "pb_weight": 0.60,
-            "note": "周期行业当前利润可能处于周期高低点，必须防止用景气高点利润高估公司价值。",
+            "note": "周期行业当前利润可能处于周期高低点，必须防止用景气高点利润高估公司价值。"
         }
 
     if annual_roe is not None:
@@ -209,5 +227,5 @@ def get_valuation_config(model, annual_roe=None):
         "optimistic_pb": 2.5,
         "pe_weight": pe_weight,
         "pb_weight": pb_weight,
-        "note": "普通公司沿用V16的ROE驱动PE/PB综合估值。",
+        "note": "普通公司沿用V16的ROE驱动PE/PB综合估值。"
     }
