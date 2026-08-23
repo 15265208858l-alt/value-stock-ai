@@ -1,634 +1,150 @@
 """
 ValueStock AI
-同行业比较模块 V1
+同行业比较模块 V2.0
 
-功能：
-1. 多家公司核心财务指标横向比较
-2. 行业平均值
-3. ROE排名
-4. 成长性排名
-5. PE/PB比较
-6. 资产负债率比较
-7. 同行竞争力评分
+升级：
+1. PE/PB 使用同行中位数辅助判断，避免极端值污染平均数。
+2. 保存最近一次相对估值结果，供综合评分与最终决策联动。
+3. 保留原同行竞争力评分接口，兼容主程序。
 """
 
+from __future__ import annotations
 
 import pandas as pd
 
+from relative_valuation import calculate_relative_valuation
 
-def safe_rank_score(
-    rank,
-    total,
-    max_score
-):
-    """
-    根据排名计算得分
-    """
+LAST_RELATIVE_VALUATION = {}
 
+
+def safe_rank_score(rank, total, max_score):
     if rank is None:
         return 0
-
-    if total <= 1:
+    if total <= 1 or rank == 1:
         return max_score
-
-    if rank == 1:
-        return max_score
-
     if rank == 2:
         return max_score * 0.85
-
     if rank == 3:
         return max_score * 0.70
-
     if rank <= max(4, total // 2):
         return max_score * 0.50
-
     return max_score * 0.25
 
 
-def calculate_peer_rank(
-    df,
-    column,
-    ascending=False
-):
-    """
-    计算某项指标排名
-    """
-
-    if (
-        df is None
-        or df.empty
-        or column not in df.columns
-    ):
-
+def calculate_peer_rank(df, column, ascending=False):
+    if df is None or df.empty or column not in df.columns:
         return None
-
-
-    valid = (
-        df[
-            [
-                "代码",
-                column
-            ]
-        ]
-        .dropna(
-            subset=[
-                column
-            ]
-        )
-        .copy()
-    )
-
-
+    valid = df[["代码", column]].dropna(subset=[column]).copy()
     if valid.empty:
         return None
-
-
-    valid["_排名"] = (
-        valid[column]
-        .rank(
-            ascending=ascending,
-            method="min"
-        )
-    )
-
-
+    valid["_排名"] = valid[column].rank(ascending=ascending, method="min")
     return valid
 
 
-def calculate_peer_score(
-    df,
-    target_code
-):
-    """
-    计算目标公司的同行竞争力评分
-    """
+def calculate_peer_score(df, target_code):
+    global LAST_RELATIVE_VALUATION
 
-    if (
-        df is None
-        or df.empty
-        or target_code not in
-        df["代码"].values
-    ):
+    if df is None or df.empty or "代码" not in df.columns or target_code not in df["代码"].values:
+        LAST_RELATIVE_VALUATION = {}
+        return {"score": 0, "rating": "数据不足", "details": [], "relative_valuation": {}}
 
-        return {
-            "score": 0,
-            "rating": "数据不足",
-            "details": []
-        }
-
-
-    target = df[
-        df["代码"] == target_code
-    ].iloc[0]
-
-
-    total_score = 0
-
+    target = df[df["代码"] == target_code].iloc[0]
+    total_score = 0.0
     details = []
 
-
-    # =====================================================
-    # ROE：30分
-    # =====================================================
-
-    roe_rank_df = calculate_peer_rank(
-        df,
-        "ROE",
-        ascending=False
-    )
-
-
-    if roe_rank_df is not None:
-
-        target_row = roe_rank_df[
-            roe_rank_df["代码"]
-            == target_code
-        ]
-
-
-        if not target_row.empty:
-
-            rank = int(
-                target_row[
-                    "_排名"
-                ].iloc[0]
-            )
-
-
-            score = safe_rank_score(
-                rank,
-                len(roe_rank_df),
-                30
-            )
-
-
-            total_score += score
-
-
-            details.append({
-                "指标": "ROE",
-                "排名": rank,
-                "得分": round(
-                    score,
-                    1
-                )
-            })
-
-
-    # =====================================================
-    # 营收增长：20分
-    # =====================================================
-
-    revenue_rank_df = calculate_peer_rank(
-        df,
-        "营收增长率",
-        ascending=False
-    )
-
-
-    if revenue_rank_df is not None:
-
-        target_row = revenue_rank_df[
-            revenue_rank_df["代码"]
-            == target_code
-        ]
-
-
-        if not target_row.empty:
-
-            rank = int(
-                target_row[
-                    "_排名"
-                ].iloc[0]
-            )
-
-
-            score = safe_rank_score(
-                rank,
-                len(revenue_rank_df),
-                20
-            )
-
-
-            total_score += score
-
-
-            details.append({
-                "指标": "营收增长率",
-                "排名": rank,
-                "得分": round(
-                    score,
-                    1
-                )
-            })
-
-
-    # =====================================================
-    # 净利润增长：20分
-    # =====================================================
-
-    profit_rank_df = calculate_peer_rank(
-        df,
-        "净利润增长率",
-        ascending=False
-    )
-
-
-    if profit_rank_df is not None:
-
-        target_row = profit_rank_df[
-            profit_rank_df["代码"]
-            == target_code
-        ]
-
-
-        if not target_row.empty:
-
-            rank = int(
-                target_row[
-                    "_排名"
-                ].iloc[0]
-            )
-
-
-            score = safe_rank_score(
-                rank,
-                len(profit_rank_df),
-                20
-            )
-
-
-            total_score += score
-
-
-            details.append({
-                "指标": "净利润增长率",
-                "排名": rank,
-                "得分": round(
-                    score,
-                    1
-                )
-            })
-
-
-    # =====================================================
-    # PE：15分
-    # PE越低越优
-    # =====================================================
-
-    pe_rank_df = calculate_peer_rank(
-        df,
-        "PE",
-        ascending=True
-    )
-
-
-    if pe_rank_df is not None:
-
-        target_row = pe_rank_df[
-            pe_rank_df["代码"]
-            == target_code
-        ]
-
-
-        if not target_row.empty:
-
-            rank = int(
-                target_row[
-                    "_排名"
-                ].iloc[0]
-            )
-
-
-            score = safe_rank_score(
-                rank,
-                len(pe_rank_df),
-                15
-            )
-
-
-            total_score += score
-
-
-            details.append({
-                "指标": "PE",
-                "排名": rank,
-                "得分": round(
-                    score,
-                    1
-                )
-            })
-
-
-    # =====================================================
-    # 资产负债率：15分
-    # 越低越优
-    # =====================================================
-
-    debt_rank_df = calculate_peer_rank(
-        df,
-        "资产负债率",
-        ascending=True
-    )
-
-
-    if debt_rank_df is not None:
-
-        target_row = debt_rank_df[
-            debt_rank_df["代码"]
-            == target_code
-        ]
-
-
-        if not target_row.empty:
-
-            rank = int(
-                target_row[
-                    "_排名"
-                ].iloc[0]
-            )
-
-
-            score = safe_rank_score(
-                rank,
-                len(debt_rank_df),
-                15
-            )
-
-
-            total_score += score
-
-
-            details.append({
-                "指标": "资产负债率",
-                "排名": rank,
-                "得分": round(
-                    score,
-                    1
-                )
-            })
-
-
-    total_score = round(
-        total_score
-    )
-
-
-    if total_score >= 85:
-
-        rating = "优秀"
-
-    elif total_score >= 70:
-
-        rating = "良好"
-
-    elif total_score >= 55:
-
-        rating = "一般"
-
-    else:
-
-        rating = "偏弱"
-
+    metric_specs = [
+        ("ROE", False, 30),
+        ("营收增长率", False, 20),
+        ("净利润增长率", False, 20),
+        ("PE", True, 15),
+        ("资产负债率", True, 15),
+    ]
+
+    for column, ascending, max_score in metric_specs:
+        rank_df = calculate_peer_rank(df, column, ascending=ascending)
+        if rank_df is None:
+            continue
+        row = rank_df[rank_df["代码"] == target_code]
+        if row.empty:
+            continue
+        rank = int(row["_排名"].iloc[0])
+        score = safe_rank_score(rank, len(rank_df), max_score)
+        total_score += score
+        details.append({"指标": column, "排名": rank, "得分": round(score, 1)})
+
+    total_score = round(total_score)
+    rating = "优秀" if total_score >= 85 else "良好" if total_score >= 70 else "一般" if total_score >= 55 else "偏弱"
+
+    LAST_RELATIVE_VALUATION = calculate_relative_valuation(df, target_code)
 
     return {
-
         "score": total_score,
-
         "rating": rating,
-
-        "details": details
+        "details": details,
+        "relative_valuation": LAST_RELATIVE_VALUATION,
     }
 
 
-def build_peer_summary(
-    df
-):
-    """
-    计算同行平均值
-    """
+def get_last_relative_valuation():
+    return LAST_RELATIVE_VALUATION.copy()
 
-    if (
-        df is None
-        or df.empty
-    ):
 
+def build_peer_summary(df):
+    if df is None or df.empty:
         return pd.DataFrame()
 
+    rows = []
+    for column in ["ROE", "营收增长率", "净利润增长率", "资产负债率", "PE", "PB"]:
+        if column not in df.columns:
+            continue
+        series = pd.to_numeric(df[column], errors="coerce").dropna()
+        if series.empty:
+            continue
+        rows.append({"指标": column, "同行平均": round(float(series.mean()), 2), "同行中位": round(float(series.median()), 2)})
 
-    columns = [
-
-        "ROE",
-
-        "营收增长率",
-
-        "净利润增长率",
-
-        "资产负债率",
-
-        "PE",
-
-        "PB"
-
-    ]
+    return pd.DataFrame(rows)
 
 
-    available = [
-
-        column
-
-        for column in columns
-
-        if column in df.columns
-
-    ]
-
-
-    if not available:
-
-        return pd.DataFrame()
-
-
-    summary = []
-
-
-    for column in available:
-
-        summary.append({
-
-            "指标": column,
-
-            "同行平均":
-
-                df[column]
-                .mean()
-
-        })
-
-
-    result = pd.DataFrame(
-        summary
-    )
-
-
-    result[
-        "同行平均"
-    ] = (
-        result[
-            "同行平均"
-        ]
-        .round(2)
-    )
-
-
-    return result
-
-
-def compare_target_with_average(
-    df,
-    target_code
-):
-    """
-    目标公司与同行平均比较
-    """
-
+def compare_target_with_average(df, target_code):
     result = []
-
-
-    if (
-        df is None
-        or df.empty
-    ):
-
+    if df is None or df.empty or "代码" not in df.columns:
         return result
 
-
-    target_rows = df[
-        df["代码"]
-        == target_code
-    ]
-
-
+    target_rows = df[df["代码"] == target_code]
     if target_rows.empty:
-
         return result
-
-
-    target = (
-        target_rows
-        .iloc[0]
-    )
-
+    target = target_rows.iloc[0]
 
     metrics = [
-
-        (
-            "ROE",
-            "higher_better"
-        ),
-
-        (
-            "营收增长率",
-            "higher_better"
-        ),
-
-        (
-            "净利润增长率",
-            "higher_better"
-        ),
-
-        (
-            "资产负债率",
-            "lower_better"
-        ),
-
-        (
-            "PE",
-            "lower_better"
-        ),
-
-        (
-            "PB",
-            "lower_better"
-        )
+        ("ROE", "higher_better"),
+        ("营收增长率", "higher_better"),
+        ("净利润增长率", "higher_better"),
+        ("资产负债率", "lower_better"),
+        ("PE", "lower_better"),
+        ("PB", "lower_better"),
     ]
 
-
     for metric, direction in metrics:
-
         if metric not in df.columns:
-
             continue
-
-
-        target_value = target[
-            metric
-        ]
-
-
-        average_value = (
-            df[metric]
-            .mean()
-        )
-
-
-        if pd.isna(
-            target_value
-        ):
-
+        series = pd.to_numeric(df[metric], errors="coerce").dropna()
+        target_value = pd.to_numeric(target.get(metric), errors="coerce")
+        if series.empty or pd.isna(target_value):
             continue
-
+        avg = float(series.mean())
+        median = float(series.median())
 
         if direction == "higher_better":
-
-            if target_value > average_value:
-
-                judgment = "高于同行"
-
-            elif target_value < average_value:
-
-                judgment = "低于同行"
-
-            else:
-
-                judgment = "接近同行"
-
+            judgment = "高于同行" if target_value > avg else "低于同行" if target_value < avg else "接近同行"
         else:
-
-            if target_value < average_value:
-
-                judgment = "优于同行"
-
-            elif target_value > average_value:
-
-                judgment = "弱于同行"
-
-            else:
-
-                judgment = "接近同行"
-
+            judgment = "优于同行" if target_value < avg else "弱于同行" if target_value > avg else "接近同行"
 
         result.append({
-
             "指标": metric,
-
-            "目标公司": round(
-                float(
-                    target_value
-                ),
-                2
-            ),
-
-            "同行平均": round(
-                float(
-                    average_value
-                ),
-                2
-            ),
-
-            "判断": judgment
+            "目标公司": round(float(target_value), 2),
+            "同行平均": round(avg, 2),
+            "同行中位": round(median, 2),
+            "判断": judgment,
         })
-
 
     return result
