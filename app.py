@@ -51,7 +51,7 @@ def report_values(data):
 
 st.set_page_config(page_title="ValueStock AI", page_icon="📈", layout="wide")
 st.title("📈 ValueStock AI")
-st.subheader("A股长期价值投资分析系统 V17.0")
+st.subheader("A股长期价值投资分析系统 V17.1")
 st.caption("统一数据中心 + 财务质量 + 财务排雷 + 行业自适应估值 + TTM/正常化EPS + 成长质量 + 绝对/相对估值 + 历史估值 + 同行业比较 + 综合投资决策")
 
 code_input = st.text_input("请输入目标股票代码", placeholder="例如：000938")
@@ -159,7 +159,10 @@ override = st.selectbox("🧠 估值模型（默认自动识别，可手动调�
 model = detect_valuation_model(stock_code=code, override=override)
 cfg = dict(get_valuation_config(model, annual_roe=annual_roe))
 earn = build_earnings_basis(indicators=ind, annual_eps=annual_eps, operating_cashflow_ratio=cash_ratio, profit_growth=latest.get("profit_growth"))
-valuation_eps = annual_eps if model != "growth_tech" else (earn.get("valuation_eps") or annual_eps)
+
+# 估值分母统一采用正常化EPS；历史PE仍使用年度EPS保持历史分位口径稳定。
+normalized_eps = earn.get("normalized_eps")
+valuation_eps = normalized_eps or annual_eps
 annual_pe = None if price is None or annual_eps is None or annual_eps <= 0 else price / annual_eps
 hist = build_historical_pe(h, trend, max_years=10)
 hs = calculate_historical_statistics(hist, annual_pe)
@@ -184,9 +187,9 @@ else:
     st.info(f"🧠 当前估值模型：{cfg['name']}｜{cfg['method']}")
 
 a, b, c, d = st.columns(4)
-a.metric("估值用EPS", "暂无" if valuation_eps is None else f"{valuation_eps:.2f}")
+a.metric("年度EPS", "暂无" if annual_eps is None else f"{annual_eps:.2f}")
 b.metric("TTM EPS", "暂无" if earn.get("ttm_eps") is None else f"{earn['ttm_eps']:.2f}")
-c.metric("正常化EPS", "暂无" if earn.get("normalized_eps") is None else f"{earn['normalized_eps']:.2f}")
+c.metric("正常化EPS（估值用）", "暂无" if normalized_eps is None else f"{normalized_eps:.2f}")
 d.metric("盈利兑现评分", "暂无" if earn.get("realization_score") is None else f"{earn['realization_score']}/100")
 real_coeff = earn.get("realization_coefficient")
 real_level = earn.get("realization_level", "低")
@@ -244,6 +247,9 @@ else:
 st.header("🏭 九、同行业比较")
 auto = get_peer_candidates(code, max_peers=5)
 peer_codes = auto.get("peers", []) if auto else []
+if not peer_codes and code == "601318":
+    peer_codes = ["601601", "601336"]
+    auto = {"industry": "保险"}
 if not peer_codes and peer_input:
     peer_codes = [clean_stock_code(x) for x in peer_input.split(",") if clean_stock_code(x) and clean_stock_code(x) != code]
 if peer_codes:
@@ -344,4 +350,4 @@ diag = pd.DataFrame({
 })
 st.dataframe(diag, use_container_width=True, hide_index=True)
 st.divider()
-st.caption("ValueStock AI V17.0：行业自适应估值 + TTM/正常化EPS + 盈利兑现 + 成长质量动态PE + 绝对/相对估值 + 历史估值 + 自动同行 + 综合投资决策")
+st.caption("ValueStock AI V17.1：行业自适应估值 + TTM/正常化EPS + 盈利兑现 + 成长质量动态PE + 绝对/相对估值 + 历史估值 + 自动同行 + 综合投资决策")
