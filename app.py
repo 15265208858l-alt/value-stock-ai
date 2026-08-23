@@ -12,7 +12,7 @@ from historical_valuation import build_historical_pe, calculate_historical_stati
 from peer_compare import calculate_peer_score, build_peer_summary, compare_target_with_average
 from investment_score import calculate_investment_score
 from investment_decision import make_investment_decision
-from industry import get_peer_candidates
+from industry import get_peer_candidates, get_stock_name
 
 
 def sf(v):
@@ -51,8 +51,8 @@ def report_values(data):
 
 st.set_page_config(page_title="ValueStock AI", page_icon="📈", layout="wide")
 st.title("📈 ValueStock AI")
-st.subheader("A股长期价值投资分析系统 V16.9")
-st.caption("统一数据中心 + 财务质量 + 财务排雷 + 行业自适应估值 + TTM/正常化EPS + 成长质量 + 历史估值 + 同行业比较 + 综合投资决策")
+st.subheader("A股长期价值投资分析系统 V17.0")
+st.caption("统一数据中心 + 财务质量 + 财务排雷 + 行业自适应估值 + TTM/正常化EPS + 成长质量 + 绝对/相对估值 + 历史估值 + 同行业比较 + 综合投资决策")
 
 code_input = st.text_input("请输入目标股票代码", placeholder="例如：000938")
 peer_input = st.text_input("同行股票代码（自动识别失败时可手动输入2～5只）", placeholder="例如：300308,300502,601138")
@@ -158,16 +158,12 @@ st.header("💰 七、当前价值估值")
 override = st.selectbox("🧠 估值模型（默认自动识别，可手动调整）", ["自动识别", "普通成长/制造", "成长科技", "银行", "保险", "券商", "周期"], index=0)
 model = detect_valuation_model(stock_code=code, override=override)
 cfg = dict(get_valuation_config(model, annual_roe=annual_roe))
-
 earn = build_earnings_basis(indicators=ind, annual_eps=annual_eps, operating_cashflow_ratio=cash_ratio, profit_growth=latest.get("profit_growth"))
 valuation_eps = annual_eps if model != "growth_tech" else (earn.get("valuation_eps") or annual_eps)
-
-# 历史PE先用实际年度盈利口径，不用人为放大的估值EPS
 annual_pe = None if price is None or annual_eps is None or annual_eps <= 0 else price / annual_eps
 hist = build_historical_pe(h, trend, max_years=10)
 hs = calculate_historical_statistics(hist, annual_pe)
 
-# V16.9 成长质量动态PE
 if model == "growth_tech":
     gq = calculate_growth_quality(
         revenue_growth=latest.get("revenue_growth"),
@@ -178,11 +174,7 @@ if model == "growth_tech":
         annual_eps=annual_eps,
         historical_percentile=hs.get("percentile"),
     )
-    dynamic_pe = get_dynamic_growth_pe(
-        gq["score"],
-        historical_percentile=hs.get("percentile"),
-        cashflow_ratio=cash_ratio,
-    )
+    dynamic_pe = get_dynamic_growth_pe(gq["score"], historical_percentile=hs.get("percentile"), cashflow_ratio=cash_ratio)
     cfg["conservative_pe"] = dynamic_pe["conservative_pe"]
     cfg["normal_pe"] = dynamic_pe["normal_pe"]
     cfg["optimistic_pe"] = dynamic_pe["optimistic_pe"]
@@ -206,9 +198,7 @@ if gq is not None:
     a.metric("成长质量", f"{gq['score']}/100")
     b.metric("成长质量等级", gq["level"])
     c.metric("动态PE区间", f"{cfg['conservative_pe']:.1f}～{cfg['optimistic_pe']:.1f}倍")
-    st.caption(
-        f"成长质量拆解：营收 {gq['revenue_points']:+.0f}｜利润 {gq['profit_points']:+.0f}｜ROE {gq['roe_points']:+.0f}｜现金流 {gq['cash_points']:+.0f}｜盈利动能 {gq['momentum_points']:+.0f}｜历史估值修正 {gq['history_penalty']:+.0f}"
-    )
+    st.caption(f"成长质量拆解：营收 {gq['revenue_points']:+.0f}｜利润 {gq['profit_points']:+.0f}｜ROE {gq['roe_points']:+.0f}｜现金流 {gq['cash_points']:+.0f}｜盈利动能 {gq['momentum_points']:+.0f}｜历史估值修正 {gq['history_penalty']:+.0f}")
 
 valuation_pe = None if price is None or valuation_eps is None or valuation_eps <= 0 else price / valuation_eps
 pb = None if price is None or annual_bvps is None or annual_bvps <= 0 else price / annual_bvps
@@ -257,7 +247,8 @@ peer_codes = auto.get("peers", []) if auto else []
 if not peer_codes and peer_input:
     peer_codes = [clean_stock_code(x) for x in peer_input.split(",") if clean_stock_code(x) and clean_stock_code(x) != code]
 if peer_codes:
-    st.caption(f"自动行业：{auto.get('industry') or '未识别'}｜同行：{', '.join(peer_codes[:5])}")
+    peer_desc = ", ".join([f"{pc} {get_stock_name(pc) or pc}" for pc in peer_codes[:5]])
+    st.caption(f"自动行业：{auto.get('industry') or '未识别'}｜同行：{peer_desc}")
 else:
     st.warning("⚠️ 自动同行识别失败，可手动输入2～5只同行股票")
 
@@ -274,7 +265,8 @@ if len(peer_codes) >= 2:
             pp = sf(pm.get("最新价")) or get_latest_price(pdta.get("history"))
             pe = None if pp is None or pfd.get("eps") in {None, 0} else pp / pfd["eps"]
             pbt = None if pp is None or pfd.get("bvps") in {None, 0} else pp / pfd["bvps"]
-            rows.append({"代码": pc, "名称": pm.get("名称", pc), "价格": pp, "ROE": pfd.get("roe"), "营收增长率": pfd.get("revenue_growth"), "净利润增长率": pfd.get("profit_growth"), "PE": pe, "PB": pbt})
+            pname = pm.get("名称") or get_stock_name(pc) or pc
+            rows.append({"代码": pc, "名称": pname, "价格": pp, "ROE": pfd.get("roe"), "营收增长率": pfd.get("revenue_growth"), "净利润增长率": pfd.get("profit_growth"), "PE": pe, "PB": pbt})
         except Exception:
             continue
     if len(rows) >= 2:
@@ -288,7 +280,14 @@ if len(peer_codes) >= 2:
             st.dataframe(pd.DataFrame(comp), use_container_width=True, hide_index=True)
         pr = calculate_peer_score(pdf, code)
         peer_score = pr.get("score")
+        rel = pr.get("relative_valuation") or {}
         st.metric("同行竞争力", "暂无" if peer_score is None else f"{peer_score}/100")
+        if rel.get("available"):
+            ra, rb, rc = st.columns(3)
+            ra.metric("同行PE中位数", "暂无" if rel.get("peer_median_pe") is None else f"{rel['peer_median_pe']:.2f}倍")
+            rb.metric("同行PB中位数", "暂无" if rel.get("peer_median_pb") is None else f"{rel['peer_median_pb']:.2f}倍")
+            rc.metric("相对估值判断", rel.get("level", "数据不足"))
+            st.caption(f"目标PE/同行中位PE：{rel.get('pe_ratio', '暂无')}｜目标PB/同行中位PB：{rel.get('pb_ratio', '暂无')}")
 
 # 10 综合评分
 st.header("🏆 十、综合投资价值评分")
@@ -307,15 +306,12 @@ st.dataframe(pd.DataFrame({"分析维度": ["财务质量", "同行竞争力", "
 st.write(f"当前估值判断：**{score['valuation_level']}**")
 st.write(f"历史估值判断：**{score['historical_level']}**")
 st.write(f"风险判断：**{score['risk_level']}**")
+if score.get("relative_valuation_available"):
+    st.write(f"同行相对估值：**{score['relative_valuation_level']}**｜同行PE中位数 {score.get('peer_median_pe', '暂无')}倍｜目标PE/同行中位 {score.get('relative_pe_ratio', '暂无')}")
 
 # 11 决策
 st.header("🎯 十一、最终投资决策")
-decision = make_investment_decision(
-    investment_score=score["score"],
-    valuation_level=score["valuation_level"],
-    historical_level=score["historical_level"],
-    risk_level=score["risk_level"],
-)
+decision = make_investment_decision(investment_score=score["score"], valuation_level=score["valuation_level"], historical_level=score["historical_level"], risk_level=score["risk_level"])
 a, b, c = st.columns(3)
 a.metric("投资决策", decision["decision"])
 b.metric("建议操作", decision["action"])
@@ -341,19 +337,11 @@ if risk.get("risk_items"):
         st.write(f"- {x}")
 
 # 13 诊断
-st.header("🛠️ 十三、系统诊断")
+st.header("🛠️ 系统诊断")
 diag = pd.DataFrame({
     "模块": ["data.py", "financial.py", "risk.py", "valuation.py", "adaptive_valuation.py", "earnings_basis.py", "growth_quality.py", "historical_valuation.py", "peer_compare.py", "industry.py", "investment_score.py", "investment_decision.py"],
-    "状态": [
-        "✅", "✅", "✅", "✅", "✅",
-        "✅" if earn.get("valuation_eps") is not None else "⏳",
-        "✅" if gq is not None else "⏳",
-        "✅" if hist is not None and not hist.empty else "⏳",
-        "✅" if peer_score is not None else "⏳",
-        "✅" if peer_codes else "⏳",
-        "✅", "✅",
-    ],
+    "状态": ["✅", "✅", "✅", "✅", "✅", "✅" if earn.get("valuation_eps") is not None else "⏳", "✅" if gq is not None else "⏳", "✅" if hist is not None and not hist.empty else "⏳", "✅" if peer_score is not None else "⏳", "✅" if peer_codes else "⏳", "✅", "✅"]
 })
 st.dataframe(diag, use_container_width=True, hide_index=True)
 st.divider()
-st.caption("ValueStock AI V16.9：行业自适应估值 + TTM/正常化EPS + 盈利兑现 + 成长质量动态PE + 历史估值 + 自动同行 + 综合投资决策")
+st.caption("ValueStock AI V17.0：行业自适应估值 + TTM/正常化EPS + 盈利兑现 + 成长质量动态PE + 绝对/相对估值 + 历史估值 + 自动同行 + 综合投资决策")
