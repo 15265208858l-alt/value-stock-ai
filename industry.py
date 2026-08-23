@@ -1,9 +1,10 @@
 """
 ValueStock AI
-行业与同行股票池 V3
+行业与同行股票池 V3.1
 
-目标：
-稳定提供主要A股公司的同行股票池，并覆盖核心成长科技板块。
+稳定性修复：
+- 自动同行默认最多2只，避免第九模块一次触发大量AKShare接口导致Streamlit卡住。
+- 手动同行输入功能保留。
 """
 
 INDUSTRY_STOCK_POOLS = {
@@ -22,11 +23,10 @@ for industry_name, stocks in INDUSTRY_STOCK_POOLS.items():
     for code, name in stocks:
         STOCK_INDUSTRY_MAP.setdefault(code, {"industry": industry_name, "name": name})
 
-# 对重复出现的核心科技股，优先使用更适合估值比较的细分行业。
 for code, industry in {
     "300308": "光通信", "300502": "光通信", "300394": "光通信",
     "002156": "半导体", "688981": "半导体", "688041": "半导体",
-    "000938": "计算机", "000977": "计算机", "601138": "AI/算力"
+    "000938": "计算机", "000977": "计算机", "601138": "AI/算力",
 }.items():
     if code in STOCK_INDUSTRY_MAP:
         STOCK_INDUSTRY_MAP[code]["industry"] = industry
@@ -60,7 +60,9 @@ def get_peer_candidates(stock_code, max_peers=5):
     if not industry:
         return {"industry": None, "name": name, "peers": []}
     peers = [x for x in get_industry_stock_pool(industry) if x != code]
-    return {"industry": industry, "name": name, "peers": peers[:max_peers]}
+    # 稳定性保护：自动最多加载2只同行，避免第九模块触发30+次远端接口。
+    auto_limit = min(max(int(max_peers or 5), 0), 2)
+    return {"industry": industry, "name": name, "peers": peers[:auto_limit]}
 
 
 def get_industry_info(stock_code):
