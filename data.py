@@ -1,6 +1,7 @@
-"""ValueStock AI 数据中心 V1.1"""
+"""ValueStock AI 数据中心 V1.2"""
 
 import akshare as ak
+from functools import lru_cache
 
 
 def clean_stock_code(code):
@@ -45,8 +46,6 @@ def get_realtime_market(stock_code):
         if result.empty:
             return None
         market = result.iloc[0].to_dict()
-
-        # 交易接口有时只有代码没有名称；用维护型行业股票池兜底。
         if not market.get("名称") or str(market.get("名称")).strip() in {"None", "nan", ""}:
             try:
                 from industry import get_stock_name
@@ -124,7 +123,9 @@ def get_financial_report(stock_code, report_type):
     return None
 
 
+@lru_cache(maxsize=32)
 def load_stock_data(stock_code):
+    """加载并缓存股票基础数据；同一运行进程内重复调用同一股票不会重复访问远端接口。"""
     stock_code = clean_stock_code(stock_code)
     if not stock_code:
         return None
