@@ -1,306 +1,73 @@
 """
 ValueStock AI
-行业与同行股票池 V2
+行业与同行股票池 V3
 
 目标：
-稳定提供主要A股公司的同行股票池。
-
-原则：
-1. 不依赖不稳定的实时行业反查接口
-2. 采用维护型行业股票池
-3. 自动根据股票代码匹配行业
-4. 自动排除目标股票
-5. 自动返回最多5只同行
+稳定提供主要A股公司的同行股票池，并覆盖核心成长科技板块。
 """
 
-# =========================================================
-# 1. 行业股票池
-# =========================================================
-
 INDUSTRY_STOCK_POOLS = {
-
-    "电力设备": [
-
-        ("600089", "特变电工"),
-        ("000400", "许继电气"),
-        ("600312", "平高电气"),
-        ("601179", "中国西电"),
-        ("002028", "思源电气"),
-        ("600406", "国电南瑞"),
-        ("300274", "阳光电源"),
-        ("688390", "固德威")
-
-    ],
-
-    "家用电器": [
-
-        ("000333", "美的集团"),
-        ("000651", "格力电器"),
-        ("600690", "海尔智家"),
-        ("002032", "苏泊尔"),
-        ("002050", "三花智控"),
-        ("000921", "海信家电")
-
-    ],
-
-    "有色金属": [
-
-        ("601899", "紫金矿业"),
-        ("603993", "洛阳钼业"),
-        ("600547", "山东黄金"),
-        ("600489", "中金黄金"),
-        ("600111", "北方稀土"),
-        ("000878", "云南铜业")
-
-    ],
-
-    "计算机": [
-
-        ("000938", "紫光股份"),
-        ("000977", "浪潮信息"),
-        ("600845", "宝信软件"),
-        ("600570", "恒生电子"),
-        ("002410", "广联达"),
-        ("300454", "深信服")
-
-    ],
-
-    "养殖": [
-
-        ("002714", "牧原股份"),
-        ("300498", "温氏股份"),
-        ("002567", "唐人神"),
-        ("002458", "益生股份"),
-        ("000876", "新希望"),
-        ("002100", "天康生物")
-
-    ]
-
+    "电力设备": [("600089", "特变电工"), ("000400", "许继电气"), ("600312", "平高电气"), ("601179", "中国西电"), ("002028", "思源电气"), ("600406", "国电南瑞"), ("300274", "阳光电源"), ("688390", "固德威")],
+    "家用电器": [("000333", "美的集团"), ("000651", "格力电器"), ("600690", "海尔智家"), ("002032", "苏泊尔"), ("002050", "三花智控"), ("000921", "海信家电")],
+    "有色金属": [("601899", "紫金矿业"), ("603993", "洛阳钼业"), ("600547", "山东黄金"), ("600489", "中金黄金"), ("600111", "北方稀土"), ("000878", "云南铜业")],
+    "计算机": [("000938", "紫光股份"), ("000977", "浪潮信息"), ("600845", "宝信软件"), ("600570", "恒生电子"), ("002410", "广联达"), ("300454", "深信服"), ("002230", "科大讯飞"), ("688111", "金山办公")],
+    "光通信": [("300308", "中际旭创"), ("300502", "新易盛"), ("300394", "天孚通信"), ("002281", "光迅科技"), ("000988", "华工科技"), ("603083", "剑桥科技")],
+    "半导体": [("002156", "通富微电"), ("688981", "中芯国际"), ("688041", "海光信息"), ("688008", "澜起科技"), ("002371", "北方华创"), ("603986", "兆易创新"), ("600584", "长电科技"), ("600460", "士兰微")],
+    "AI/算力": [("300308", "中际旭创"), ("300502", "新易盛"), ("000938", "紫光股份"), ("000977", "浪潮信息"), ("601138", "工业富联"), ("688041", "海光信息"), ("688256", "寒武纪")],
+    "养殖": [("002714", "牧原股份"), ("300498", "温氏股份"), ("002567", "唐人神"), ("002458", "益生股份"), ("000876", "新希望"), ("002100", "天康生物")],
 }
 
-
-# =========================================================
-# 2. 股票 → 行业映射
-# =========================================================
-
 STOCK_INDUSTRY_MAP = {}
-
-
 for industry_name, stocks in INDUSTRY_STOCK_POOLS.items():
-
     for code, name in stocks:
+        STOCK_INDUSTRY_MAP.setdefault(code, {"industry": industry_name, "name": name})
 
-        STOCK_INDUSTRY_MAP[code] = {
-            "industry": industry_name,
-            "name": name
-        }
+# 对重复出现的核心科技股，优先使用更适合估值比较的细分行业。
+for code, industry in {
+    "300308": "光通信", "300502": "光通信", "300394": "光通信",
+    "002156": "半导体", "688981": "半导体", "688041": "半导体",
+    "000938": "计算机", "000977": "计算机", "601138": "AI/算力"
+}.items():
+    if code in STOCK_INDUSTRY_MAP:
+        STOCK_INDUSTRY_MAP[code]["industry"] = industry
 
-
-# =========================================================
-# 3. 清洗股票代码
-# =========================================================
 
 def clean_stock_code(code):
-
     if code is None:
         return ""
-
     code = str(code).strip()
+    return code if len(code) == 6 and code.isdigit() else ""
 
-    if len(code) != 6:
-        return ""
-
-    if not code.isdigit():
-        return ""
-
-    return code
-
-
-# =========================================================
-# 4. 获取股票所属行业
-# =========================================================
 
 def get_stock_industry(stock_code):
+    return (STOCK_INDUSTRY_MAP.get(clean_stock_code(stock_code)) or {}).get("industry")
 
-    stock_code = clean_stock_code(
-        stock_code
-    )
-
-    if not stock_code:
-        return None
-
-    result = STOCK_INDUSTRY_MAP.get(
-        stock_code
-    )
-
-    if result is None:
-        return None
-
-    return result["industry"]
-
-
-# =========================================================
-# 5. 获取股票名称
-# =========================================================
 
 def get_stock_name(stock_code):
-
-    stock_code = clean_stock_code(
-        stock_code
-    )
-
-    if not stock_code:
-        return None
-
-    result = STOCK_INDUSTRY_MAP.get(
-        stock_code
-    )
-
-    if result is None:
-        return None
-
-    return result["name"]
+    return (STOCK_INDUSTRY_MAP.get(clean_stock_code(stock_code)) or {}).get("name")
 
 
-# =========================================================
-# 6. 获取行业股票池
-# =========================================================
-
-def get_industry_stock_pool(
-    industry_name
-):
-
-    if not industry_name:
-        return []
-
-    stocks = (
-        INDUSTRY_STOCK_POOLS.get(
-            industry_name,
-            []
-        )
-    )
-
-    return [
-        code
-        for code, name in stocks
-    ]
+def get_industry_stock_pool(industry_name):
+    return [code for code, _ in INDUSTRY_STOCK_POOLS.get(industry_name, [])]
 
 
-# =========================================================
-# 7. 自动寻找同行
-# =========================================================
-
-def get_peer_candidates(
-    stock_code,
-    max_peers=5
-):
-
-    stock_code = clean_stock_code(
-        stock_code
-    )
-
-    if not stock_code:
-
-        return {
-            "industry": None,
-            "name": None,
-            "peers": []
-        }
+def get_peer_candidates(stock_code, max_peers=5):
+    code = clean_stock_code(stock_code)
+    if not code:
+        return {"industry": None, "name": None, "peers": []}
+    industry = get_stock_industry(code)
+    name = get_stock_name(code)
+    if not industry:
+        return {"industry": None, "name": name, "peers": []}
+    peers = [x for x in get_industry_stock_pool(industry) if x != code]
+    return {"industry": industry, "name": name, "peers": peers[:max_peers]}
 
 
-    industry_name = (
-        get_stock_industry(
-            stock_code
-        )
-    )
-
-
-    stock_name = (
-        get_stock_name(
-            stock_code
-        )
-    )
-
-
-    if industry_name is None:
-
-        return {
-            "industry": None,
-            "name": stock_name,
-            "peers": []
-        }
-
-
-    pool = (
-        get_industry_stock_pool(
-            industry_name
-        )
-    )
-
-
-    peers = [
-
-        code
-
-        for code in pool
-
-        if code != stock_code
-
-    ]
-
-
-    peers = peers[
-        :max_peers
-    ]
-
-
+def get_industry_info(stock_code):
+    result = get_peer_candidates(stock_code)
     return {
-
-        "industry":
-            industry_name,
-
-        "name":
-            stock_name,
-
-        "peers":
-            peers
-    }
-
-
-# =========================================================
-# 8. 显示行业信息
-# =========================================================
-
-def get_industry_info(
-    stock_code
-):
-
-    result = (
-        get_peer_candidates(
-            stock_code
-        )
-    )
-
-    return {
-
-        "stock_code":
-            clean_stock_code(
-                stock_code
-            ),
-
-        "stock_name":
-            result.get(
-                "name"
-            ),
-
-        "industry":
-            result.get(
-                "industry"
-            ),
-
-        "peers":
-            result.get(
-                "peers",
-                []
-            )
+        "stock_code": clean_stock_code(stock_code),
+        "stock_name": result.get("name"),
+        "industry": result.get("industry"),
+        "peers": result.get("peers", []),
     }
