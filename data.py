@@ -1,9 +1,11 @@
-"""ValueStock AI 数据中心 V1.3
+"""ValueStock AI 数据中心 V1.4
 
-为 Work OS 共享调用增加：
+Work OS 共享调用增强版：
 1. 多次重试
 2. 数据源诊断
 3. 单模块失败不影响其他模块
+4. 行情/历史数据增加 Sina/Tencent 备用链路
+5. 不再因为 Eastmoney 连接被远端主动断开而直接判定无数据
 """
 
 import time
@@ -18,6 +20,10 @@ def _record_error(module, exc):
     _LAST_ERRORS[module] = f"{type(exc).__name__}: {exc}"
 
 
+def _clear_error(module):
+    _LAST_ERRORS.pop(module, None)
+
+
 def get_data_diagnostics():
     return dict(_LAST_ERRORS)
 
@@ -30,10 +36,10 @@ def _call_with_retry(name, func, attempts=3, delay=1.2):
             if result is not None:
                 try:
                     if not result.empty:
-                        _LAST_ERRORS.pop(name, None)
+                        _clear_error(name)
                         return result
                 except AttributeError:
-                    _LAST_ERRORS.pop(name, None)
+                    _clear_error(name)
                     return result
             last_exc = RuntimeError("返回空数据")
         except Exception as exc:
@@ -72,52 +78,130 @@ def get_symbol_code(stock_code):
     return stock_code
 
 
+def _normalize_spot_result(data, stock_code):
+    """统一不同行情源的字段，保证上层 analysis_engine 不需要改。"""
+    if data is None or data.empty:
+        return None
+    try:
+        code_col = next((c for c in ["代码", "股票代码", "code", "symbol"] if c in data.columns), None)
+        if code_col is None:
+            return None
+        result = data[data[code_col].astype(str).str.replace("[A-Za-z]", "", regex=True).str.zfill(6) == stock_code]
+        if result.empty:
+            # Sina 有时返回 sh600xxx / sz000xxx
+            result = data[data[code_col].astype(str).str[-6:] == stock_code]
+        if result.empty:
+            return None
+        market = result.iloc[0].to_dict()
+        if "名称" not in market:
+            for candidate in ["name", "股票名称"]:
+                if candidate in market:
+                    market["名称"] = market[candidate]
+                    break
+        if "最新价" not in market:
+            for candidate in ["trade", "现价", "price"]:
+                if candidate in market:
+                    market["最新价"] = market[candidate]
+                    break
+        if "涨跌幅" not in market:
+            for candidate in ["changepercent", "涨跌幅(%)", "change_percent"]:
+                if candidate in market:
+                    market["涨跌幅"] = market[candidate]
+                    break
+        if "成交额" not in market:
+            for candidate in ["amount", "成交额"]:
+                if candidate in market:
+                    market["成交额"] = market[candidate]
+                    break
+        return market
+    except Exception:
+        return None
+
+
 def get_realtime_market(stock_code):
     stock_code = clean_stock_code(stock_code)
     if not stock_code:
         return None
-    data = _call_with_retry("realtime_market", ak.stock_zh_a_spot_em, attempts=3)
+
+    # ① Eastmoney：保留原有主链路
+    data = _call_with_retry("realtime_market", ak.stock_zh_a_spot_em, attempts=2, delay=0.8)
+    market = _normalize_spot_result(data, stock_code)
+    if market is not None:
+        _clear_error("realtime_market")
+        return market
+
+    # ② Sina：只取 A 股实时行情，避免 Eastmoney 全市场接口被远端断开
+    data = _call_with_retry("realtime_sina", ak.stock_zh_a_spot, attempts=2, delay=0.8)
+    market = _normalize_spot_result(data, stock_code)
+    if market is not None:
+        _clear_error("realtime_market")
+        return market
+
+    # ③ 名称兜底，不阻塞整个分析
+    try:
+        from industry import get_stock_name
+        name = get_stock_name(stock_code)
+        if name:
+            return {"代码": stock_code, "名称": name}
+    except Exception as exc:
+        _record_error("realtime_name_fallback", exc)
+    return None
+
+
+def _normalize_history(data):
     if data is None or data.empty:
         return None
-    try:
-        code_col = next((c for c in ["代码", "股票代码"] if c in data.columns), None)
-        if code_col is None:
-            _record_error("realtime_market", RuntimeError(f"找不到股票代码字段，实际字段：{list(data.columns)[:20]}"))
-            return None
-        result = data[data[code_col].astype(str).str.zfill(6) == stock_code]
-        if result.empty:
-            return None
-        market = result.iloc[0].to_dict()
-        if not market.get("名称") or str(market.get("名称")).strip() in {"None", "nan", ""}:
-            try:
-                from industry import get_stock_name
-                fallback_name = get_stock_name(stock_code)
-                if fallback_name:
-                    market["名称"] = fallback_name
-            except Exception:
-                pass
-        return market
-    except Exception as exc:
-        _record_error("realtime_market_parse", exc)
-        return None
+    # 上层统一使用“日期、收盘”等字段。不同源保持原字段也可以，
+    # 这里仅把常见英文列名映射到中文列名。
+    rename_map = {}
+    for src, dst in [("date", "日期"), ("close", "收盘"), ("open", "开盘"), ("high", "最高"), ("low", "最低"), ("volume", "成交量"), ("amount", "成交额")]:
+        if src in data.columns and dst not in data.columns:
+            rename_map[src] = dst
+    return data.rename(columns=rename_map)
 
 
 def get_history_data(stock_code, start_date="20200101", end_date="20500101"):
     stock_code = clean_stock_code(stock_code)
     if not stock_code:
         return None
+
+    # ① Eastmoney
     data = _call_with_retry(
         "history_em",
         lambda: ak.stock_zh_a_hist(symbol=stock_code, period="daily", start_date=start_date, end_date=end_date, adjust=""),
         attempts=2,
+        delay=0.8,
     )
+    data = _normalize_history(data)
     if data is not None:
+        _clear_error("history_em")
         return data
-    return _call_with_retry(
+
+    # ② Tencent：按市场代码请求
+    data = _call_with_retry(
         "history_tx",
         lambda: ak.stock_zh_a_hist_tx(symbol=get_market_code(stock_code), start_date=start_date, end_date=end_date, adjust=""),
         attempts=2,
+        delay=0.8,
     )
+    data = _normalize_history(data)
+    if data is not None:
+        _clear_error("history_em")
+        return data
+
+    # ③ Sina 日线：作为第二备用链路
+    data = _call_with_retry(
+        "history_sina",
+        lambda: ak.stock_zh_a_daily(symbol=get_market_code(stock_code), start_date=start_date, end_date=end_date, adjust=""),
+        attempts=2,
+        delay=0.8,
+    )
+    data = _normalize_history(data)
+    if data is not None:
+        _clear_error("history_em")
+        return data
+
+    return None
 
 
 def get_latest_price(history):
