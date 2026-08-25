@@ -1,7 +1,48 @@
-"""ValueStock AI 数据中心 V1.2"""
+"""ValueStock AI 数据中心 V1.3
+
+为 Work OS 共享调用增加：
+1. 多次重试
+2. 数据源诊断
+3. 单模块失败不影响其他模块
+"""
+
+import time
+from functools import lru_cache
 
 import akshare as ak
-from functools import lru_cache
+
+_LAST_ERRORS = {}
+
+
+def _record_error(module, exc):
+    _LAST_ERRORS[module] = f"{type(exc).__name__}: {exc}"
+
+
+def get_data_diagnostics():
+    return dict(_LAST_ERRORS)
+
+
+def _call_with_retry(name, func, attempts=3, delay=1.2):
+    last_exc = None
+    for i in range(attempts):
+        try:
+            result = func()
+            if result is not None:
+                try:
+                    if not result.empty:
+                        _LAST_ERRORS.pop(name, None)
+                        return result
+                except AttributeError:
+                    _LAST_ERRORS.pop(name, None)
+                    return result
+            last_exc = RuntimeError("返回空数据")
+        except Exception as exc:
+            last_exc = exc
+        if i < attempts - 1:
+            time.sleep(delay * (i + 1))
+    if last_exc:
+        _record_error(name, last_exc)
+    return None
 
 
 def clean_stock_code(code):
@@ -35,14 +76,15 @@ def get_realtime_market(stock_code):
     stock_code = clean_stock_code(stock_code)
     if not stock_code:
         return None
+    data = _call_with_retry("realtime_market", ak.stock_zh_a_spot_em, attempts=3)
+    if data is None or data.empty:
+        return None
     try:
-        data = ak.stock_zh_a_spot_em()
-        if data is None or data.empty:
-            return None
         code_col = next((c for c in ["代码", "股票代码"] if c in data.columns), None)
         if code_col is None:
+            _record_error("realtime_market", RuntimeError(f"找不到股票代码字段，实际字段：{list(data.columns)[:20]}"))
             return None
-        result = data[data[code_col].astype(str) == stock_code]
+        result = data[data[code_col].astype(str).str.zfill(6) == stock_code]
         if result.empty:
             return None
         market = result.iloc[0].to_dict()
@@ -55,7 +97,8 @@ def get_realtime_market(stock_code):
             except Exception:
                 pass
         return market
-    except Exception:
+    except Exception as exc:
+        _record_error("realtime_market_parse", exc)
         return None
 
 
@@ -63,19 +106,18 @@ def get_history_data(stock_code, start_date="20200101", end_date="20500101"):
     stock_code = clean_stock_code(stock_code)
     if not stock_code:
         return None
-    try:
-        data = ak.stock_zh_a_hist(symbol=stock_code, period="daily", start_date=start_date, end_date=end_date, adjust="")
-        if data is not None and not data.empty:
-            return data
-    except Exception:
-        pass
-    try:
-        data = ak.stock_zh_a_hist_tx(symbol=get_market_code(stock_code), start_date=start_date, end_date=end_date, adjust="")
-        if data is not None and not data.empty:
-            return data
-    except Exception:
-        pass
-    return None
+    data = _call_with_retry(
+        "history_em",
+        lambda: ak.stock_zh_a_hist(symbol=stock_code, period="daily", start_date=start_date, end_date=end_date, adjust=""),
+        attempts=2,
+    )
+    if data is not None:
+        return data
+    return _call_with_retry(
+        "history_tx",
+        lambda: ak.stock_zh_a_hist_tx(symbol=get_market_code(stock_code), start_date=start_date, end_date=end_date, adjust=""),
+        attempts=2,
+    )
 
 
 def get_latest_price(history):
@@ -95,37 +137,33 @@ def get_financial_indicators(stock_code):
     if not stock_code:
         return None
     for symbol in [stock_code, get_symbol_code(stock_code)]:
-        try:
-            data = ak.stock_financial_analysis_indicator(symbol=symbol)
-            if data is not None and not data.empty:
-                return data
-        except Exception:
-            pass
-    try:
-        data = ak.stock_financial_analysis_indicator_em(symbol=stock_code, indicator="按报告期")
-        if data is not None and not data.empty:
+        data = _call_with_retry(
+            f"financial_indicators_{symbol}",
+            lambda symbol=symbol: ak.stock_financial_analysis_indicator(symbol=symbol),
+            attempts=2,
+        )
+        if data is not None:
             return data
-    except Exception:
-        pass
-    return None
+    return _call_with_retry(
+        "financial_indicators_em",
+        lambda: ak.stock_financial_analysis_indicator_em(symbol=stock_code, indicator="按报告期"),
+        attempts=2,
+    )
 
 
 def get_financial_report(stock_code, report_type):
     stock_code = clean_stock_code(stock_code)
     if not stock_code:
         return None
-    try:
-        data = ak.stock_financial_report_sina(stock=get_market_code(stock_code), symbol=report_type)
-        if data is not None and not data.empty:
-            return data
-    except Exception:
-        pass
-    return None
+    return _call_with_retry(
+        f"financial_report_{report_type}",
+        lambda: ak.stock_financial_report_sina(stock=get_market_code(stock_code), symbol=report_type),
+        attempts=2,
+    )
 
 
 @lru_cache(maxsize=32)
 def load_stock_data(stock_code):
-    """加载并缓存股票基础数据；同一运行进程内重复调用同一股票不会重复访问远端接口。"""
     stock_code = clean_stock_code(stock_code)
     if not stock_code:
         return None
