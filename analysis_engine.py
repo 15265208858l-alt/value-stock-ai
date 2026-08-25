@@ -1,8 +1,11 @@
 # =========================================================
 # ValueStock AI - Shared Analysis Engine
-# V17.2.1
+# V17.2.2
 #
-# 核心原则：Work OS 与独立版 ValueStock AI 必须使用同一套计算结果。
+# Work OS 专用说明：
+# - 保留原有财务、风险、估值、历史估值、成长质量、综合评分、决策能力。
+# - 移除“同行业比较”执行模块，减少额外外部数据请求与等待时间。
+# - 不影响 ValueStock 独立版 app.py；这里只调整共享分析引擎。
 # =========================================================
 
 from __future__ import annotations
@@ -17,10 +20,9 @@ from adaptive_valuation import detect_valuation_model, get_valuation_config
 from earnings_basis import build_earnings_basis
 from growth_quality import calculate_growth_quality, get_dynamic_growth_pe
 from historical_valuation import build_historical_pe, calculate_historical_statistics, get_historical_valuation_level
-from peer_compare import calculate_peer_score, build_peer_summary, compare_target_with_average
 from investment_score import calculate_investment_score
 from investment_decision import make_investment_decision
-from industry import get_peer_candidates, get_stock_name
+from industry import get_stock_name
 
 
 def sf(v):
@@ -44,40 +46,14 @@ def lastv(df, names):
 def _records(df):
     if df is None or df.empty:
         return []
-    return df.replace({pd.NA: None}).to_dict(orient="records")
-
-
-def _peer_rows(code, data, peer_codes):
-    rows = []
-    for pc in [code] + peer_codes[:5]:
-        try:
-            pdta = data if pc == code else load_stock_data(pc)
-            if pdta is None or pdta.get("indicators") is None or pdta["indicators"].empty:
-                continue
-            pfd = process_financial_indicators(pdta["indicators"])["annual"]
-            pm = pdta.get("market") or {}
-            pp = sf(pm.get("最新价")) or get_latest_price(pdta.get("history"))
-            pe = None if pp is None or pfd.get("eps") in {None, 0} else pp / pfd["eps"]
-            pbt = None if pp is None or pfd.get("bvps") in {None, 0} else pp / pfd["bvps"]
-            pname = pm.get("名称") or get_stock_name(pc) or pc
-            rows.append({
-                "代码": pc,
-                "名称": pname,
-                "价格": pp,
-                "ROE": pfd.get("roe"),
-                "营收增长率": pfd.get("revenue_growth"),
-                "净利润增长率": pfd.get("profit_growth"),
-                "PE": pe,
-                "PB": pbt,
-                "资产负债率": pfd.get("debt"),
-            })
-        except Exception:
-            continue
-    return rows
+    try:
+        return df.where(pd.notna(df), None).to_dict(orient="records")
+    except Exception:
+        return df.to_dict(orient="records")
 
 
 def analyze_stock(stock_code: str, peer_input: str = "", override: str = "自动识别") -> dict:
-    """与独立版 ValueStock AI 使用同一套核心计算，返回稳定、完整、兼容UI的结构。"""
+    """与独立版 ValueStock AI 使用同一套核心计算，但共享版不执行同行业比较。"""
     code = clean_stock_code(stock_code)
     if not code:
         return {"success": False, "error": "请输入6位股票代码。"}
@@ -90,11 +66,13 @@ def analyze_stock(stock_code: str, peer_input: str = "", override: str = "自动
     market, history = data.get("market"), data.get("history")
     name = code
     price = chg = dyn_pe = None
+
     if market:
         name = market.get("名称", code)
         price = sf(market.get("最新价"))
         chg = sf(market.get("涨跌幅"))
         dyn_pe = sf(market.get("市盈率-动态"))
+
     if price is None:
         price = get_latest_price(history)
 
@@ -117,13 +95,17 @@ def analyze_stock(stock_code: str, peer_input: str = "", override: str = "自动
         "ocf": lastv(data.get("cashflow"), ["经营活动产生的现金流量净额", "经营活动现金流量净额"]),
     }
 
-    risk = analyze_financial_risk(rv["ocf"], rv["net_profit"], rv["receivable"], rv["revenue"], rv["inventory"], annual_roe, annual_debt)
+    risk = analyze_financial_risk(
+        rv["ocf"], rv["net_profit"], rv["receivable"], rv["revenue"],
+        rv["inventory"], annual_roe, annual_debt
+    )
     risk_score = risk.get("score", 5)
     cash_ratio = None if rv["ocf"] is None or rv["net_profit"] in {None, 0} else rv["ocf"] / rv["net_profit"]
     fq = calculate_financial_quality(trend, cash_ratio)
 
     model = detect_valuation_model(stock_code=code, override=override)
     cfg = dict(get_valuation_config(model, annual_roe=annual_roe))
+
     earn = build_earnings_basis(
         indicators=indicators,
         annual_eps=annual_eps,
@@ -160,6 +142,7 @@ def analyze_stock(stock_code: str, peer_input: str = "", override: str = "自动
 
     valuation_pe = None if price is None or valuation_eps is None or valuation_eps <= 0 else price / valuation_eps
     pb = None if price is None or annual_bvps is None or annual_bvps <= 0 else price / annual_bvps
+
     vr = calculate_valuation_scenarios(
         eps=valuation_eps,
         bvps=annual_bvps,
@@ -173,26 +156,8 @@ def analyze_stock(stock_code: str, peer_input: str = "", override: str = "自动
         pb_weight=cfg["pb_weight"],
     )
 
-    auto = get_peer_candidates(code, max_peers=5)
-    peer_codes = auto.get("peers", []) if auto else []
-    if not peer_codes and code == "601318":
-        peer_codes = ["601601", "601336"]
-        auto = {"industry": "保险"}
-    if not peer_codes and peer_input:
-        peer_codes = [clean_stock_code(x) for x in peer_input.split(",") if clean_stock_code(x) and clean_stock_code(x) != code]
-
-    rows = _peer_rows(code, data, peer_codes) if len(peer_codes) >= 2 else []
+    # 同行业比较已移除：peer_score 设为 None，由综合评分模块按缺失项自动处理。
     peer_score = None
-    peer_result = None
-    peer_summary = []
-    peer_compare = []
-    if len(rows) >= 2:
-        pdf = pd.DataFrame(rows)
-        peer_summary_df = build_peer_summary(pdf)
-        peer_summary = _records(peer_summary_df)
-        peer_compare = compare_target_with_average(pdf, code)
-        peer_result = calculate_peer_score(pdf, code)
-        peer_score = peer_result.get("score") if peer_result else None
 
     gap = None if price is None or vr["normal"] is None or vr["normal"] <= 0 else (vr["normal"] / price - 1) * 100
     score = calculate_investment_score(
@@ -202,6 +167,7 @@ def analyze_stock(stock_code: str, peer_input: str = "", override: str = "自动
         risk_score=risk_score,
         historical_percentile=hs.get("percentile"),
     )
+
     decision = make_investment_decision(
         investment_score=score["score"],
         valuation_level=score["valuation_level"],
@@ -220,10 +186,6 @@ def analyze_stock(stock_code: str, peer_input: str = "", override: str = "自动
     else:
         conclusion = "🔴 当前风险收益比较弱，暂不适合作为长期核心资产。"
 
-    # ---------------------------------------------------------
-    # 统一数据契约：Work OS 与独立版 UI 使用这些字段，避免再次出现
-    # “真实计算已经完成，但上层页面全部显示暂无”的问题。
-    # ---------------------------------------------------------
     investment = {
         "score": score.get("score"),
         "rating": score.get("rating"),
@@ -258,24 +220,12 @@ def analyze_stock(stock_code: str, peer_input: str = "", override: str = "自动
         "growth_quality": gq,
     }
 
-    peer_payload = {
-        "industry": auto.get("industry") if auto else None,
-        "codes": peer_codes[:5],
-        "peers": peer_codes[:5],
-        "rows": rows,
-        "summary": peer_summary,
-        "compare": peer_compare,
-        "score": peer_score,
-        "rating": peer_result.get("rating") if peer_result else "数据不足",
-        "result": peer_result,
-    }
-
     return {
         "success": True,
-        "engine": "ValueStock AI V17.2.1 Shared Engine",
+        "engine": "ValueStock AI V17.2.2 Shared Engine",
         "code": code,
-        "name": name,
-        "industry": auto.get("industry") if auto else None,
+        "name": name or get_stock_name(code) or code,
+        "industry": get_stock_name(code) and None,
         "data_center": dc,
         "market": {
             "name": name,
@@ -296,9 +246,13 @@ def analyze_stock(stock_code: str, peer_input: str = "", override: str = "自动
             "items": risk.get("risk_items", []),
         },
         "valuation": valuation,
-        "peer": peer_payload,
         "investment_score": score,
         "investment": investment,
         "decision": decision,
         "conclusion": conclusion,
+        "peer": {
+            "enabled": False,
+            "score": None,
+            "rating": "已关闭",
+        },
     }
