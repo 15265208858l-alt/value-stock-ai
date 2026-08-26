@@ -6,10 +6,12 @@ Work OS 共享调用增强版：
 3. 单模块失败不影响其他模块
 4. 行情/历史数据增加 Sina/Tencent 备用链路
 5. 诊断只报告最终未解决的问题；主数据源失败但备用源成功时显示为“已恢复”
+6. V17.1.1：三大财务报表并行加载，降低同行比较阶段的等待时间
 """
 
 import time
 from functools import lru_cache
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import akshare as ak
 
@@ -28,7 +30,6 @@ def _clear_error(module):
 
 
 def _mark_recovered(module, source):
-    # 主源失败但备用源成功：不再把它作为“错误”显示。
     _LAST_ERRORS.pop(module, None)
     _SOURCE_STATUS[module] = f"已恢复（{source}备用源）"
 
@@ -44,7 +45,6 @@ def get_data_diagnostics():
             result[key] = _LAST_ERRORS[key]
         else:
             result[key] = status
-    # 仅保留当前本次运行真正需要关注的项目。
     return result
 
 
@@ -143,14 +143,12 @@ def get_realtime_market(stock_code):
     if not stock_code:
         return None
 
-    # ① Eastmoney 主链路
     data = _call_with_retry("realtime_market", ak.stock_zh_a_spot_em, attempts=2, delay=0.8)
     market = _normalize_spot_result(data, stock_code)
     if market is not None:
         _clear_error("realtime_market")
         return market
 
-    # ② Sina 备用链路。该接口本身也可能被云端出口限制，所以只尝试一次重试。
     data = _call_with_retry("realtime_sina", ak.stock_zh_a_spot, attempts=2, delay=0.8)
     market = _normalize_spot_result(data, stock_code)
     if market is not None:
@@ -162,7 +160,6 @@ def get_realtime_market(stock_code):
         from industry import get_stock_name
         name = get_stock_name(stock_code)
         if name:
-            # 只有名称没有价格时，明确标记为部分恢复。
             _SOURCE_STATUS["realtime_market"] = "部分恢复（仅公司名称）"
             return {"代码": stock_code, "名称": name}
     except Exception as exc:
@@ -185,7 +182,6 @@ def get_history_data(stock_code, start_date="20200101", end_date="20500101"):
     if not stock_code:
         return None
 
-    # ① Eastmoney
     data = _call_with_retry(
         "history_em",
         lambda: ak.stock_zh_a_hist(symbol=stock_code, period="daily", start_date=start_date, end_date=end_date, adjust=""),
@@ -197,7 +193,6 @@ def get_history_data(stock_code, start_date="20200101", end_date="20500101"):
         _clear_error("history_em")
         return data
 
-    # ② Tencent
     data = _call_with_retry(
         "history_tx",
         lambda: ak.stock_zh_a_hist_tx(symbol=get_market_code(stock_code), start_date=start_date, end_date=end_date, adjust=""),
@@ -210,7 +205,6 @@ def get_history_data(stock_code, start_date="20200101", end_date="20500101"):
         _clear_error("history_tx")
         return data
 
-    # ③ Sina
     data = _call_with_retry(
         "history_sina",
         lambda: ak.stock_zh_a_daily(symbol=get_market_code(stock_code), start_date=start_date, end_date=end_date, adjust=""),
@@ -268,20 +262,44 @@ def get_financial_report(stock_code, report_type):
     )
 
 
+def _load_report_pair(stock_code, report_type):
+    return report_type, get_financial_report(stock_code, report_type)
+
+
 @lru_cache(maxsize=32)
 def load_stock_data(stock_code):
     stock_code = clean_stock_code(stock_code)
     if not stock_code:
         return None
-    return {
+
+    result = {
         "code": stock_code,
         "market": get_realtime_market(stock_code),
         "history": get_history_data(stock_code),
         "indicators": get_financial_indicators(stock_code),
-        "profit": get_financial_report(stock_code, "利润表"),
-        "balance": get_financial_report(stock_code, "资产负债表"),
-        "cashflow": get_financial_report(stock_code, "现金流量表"),
+        "profit": None,
+        "balance": None,
+        "cashflow": None,
     }
+
+    # 三张报表彼此独立，改为并行请求。
+    # 同行业比较时会加载多只股票，这能显著减少串行等待。
+    report_types = ["利润表", "资产负债表", "现金流量表"]
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = [executor.submit(_load_report_pair, stock_code, report_type) for report_type in report_types]
+        for future in as_completed(futures):
+            try:
+                report_type, report_data = future.result()
+                if report_type == "利润表":
+                    result["profit"] = report_data
+                elif report_type == "资产负债表":
+                    result["balance"] = report_data
+                elif report_type == "现金流量表":
+                    result["cashflow"] = report_data
+            except Exception as exc:
+                _record_error("financial_report_parallel", exc)
+
+    return result
 
 
 def check_data_completeness(stock_data):
