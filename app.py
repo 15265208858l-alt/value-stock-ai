@@ -51,7 +51,7 @@ def report_values(data):
 
 st.set_page_config(page_title="ValueStock AI", page_icon="📈", layout="wide")
 st.title("📈 ValueStock AI")
-st.subheader("A股长期价值投资分析系统 V17.1")
+st.subheader("A股长期价值投资分析系统 V17.2")
 st.caption("统一数据中心 + 财务质量 + 财务排雷 + 行业自适应估值 + TTM/正常化EPS + 成长质量 + 绝对/相对估值 + 历史估值 + 同行业比较 + 综合投资决策")
 
 code_input = st.text_input("请输入目标股票代码", placeholder="例如：000938")
@@ -224,6 +224,43 @@ c.metric("当前PB", "暂无" if pb is None else f"{pb:.2f}")
 d.metric("中性合理价", "暂无" if vr["normal"] is None else f"{vr['normal']:.2f} 元")
 e.metric("建仓参考价", "暂无" if vr["entry_price"] is None else f"{vr['entry_price']:.2f} 元")
 st.write(f"保守价值：{vr['conservative']:.2f} 元 ｜ 乐观价值：{vr['optimistic']:.2f} 元 ｜ 重仓参考价：{vr['heavy_price']:.2f} 元")
+
+# V17.2 估值透明度：把PE与PB两条路径拆开，避免用户只看到一个“黑箱目标价”。
+if vr.get("pe_values") or vr.get("pb_values"):
+    st.caption("🔎 估值路径拆解")
+    valuation_detail = pd.DataFrame({
+        "情景": ["保守", "中性", "乐观"],
+        "PE路径价值": [vr.get("pe_values", {}).get("conservative"), vr.get("pe_values", {}).get("normal"), vr.get("pe_values", {}).get("optimistic")],
+        "PB路径价值": [vr.get("pb_values", {}).get("conservative"), vr.get("pb_values", {}).get("normal"), vr.get("pb_values", {}).get("optimistic")],
+        "PE权重": [vr.get("pe_weight", 0.0)] * 3,
+        "PB权重": [vr.get("pb_weight", 0.0)] * 3,
+        "综合价值": [vr.get("conservative"), vr.get("normal"), vr.get("optimistic")],
+    })
+    st.dataframe(valuation_detail.round(2), use_container_width=True, hide_index=True)
+
+# 安全边际：用当前价格分别对比中性、建仓、重仓价格，形成明确的操作区间。
+if price is not None:
+    normal_gap = None if vr.get("normal") is None else (vr["normal"] / price - 1) * 100
+    entry_gap = None if vr.get("entry_price") is None else (vr["entry_price"] / price - 1) * 100
+    heavy_gap = None if vr.get("heavy_price") is None else (vr["heavy_price"] / price - 1) * 100
+    if normal_gap is None:
+        safety_label = "数据不足"
+    elif normal_gap >= 30:
+        safety_label = "明显低估"
+    elif normal_gap >= 10:
+        safety_label = "偏低估"
+    elif normal_gap >= -10:
+        safety_label = "合理附近"
+    elif normal_gap >= -20:
+        safety_label = "偏高估"
+    else:
+        safety_label = "高估"
+    a, b, c, d = st.columns(4)
+    a.metric("中性价上行空间", "暂无" if normal_gap is None else f"{normal_gap:+.1f}%")
+    b.metric("建仓价安全边际", "暂无" if entry_gap is None else f"{entry_gap:+.1f}%")
+    c.metric("重仓价安全边际", "暂无" if heavy_gap is None else f"{heavy_gap:+.1f}%")
+    d.metric("安全边际状态", safety_label)
+
 st.caption(cfg["note"])
 
 # 8 历史估值
@@ -278,7 +315,8 @@ if len(peer_codes) >= 2:
     if len(rows) >= 2:
         pdf = pd.DataFrame(rows)
         st.dataframe(pdf.round(2), use_container_width=True, hide_index=True)
-        summ = build_peer_summary(pdf)
+        # “同行平均/中位”严格排除目标公司，避免目标公司自己参与自己的横向基准。
+        summ = build_peer_summary(pdf, exclude_code=code)
         if summ is not None and not summ.empty:
             st.dataframe(summ, use_container_width=True, hide_index=True)
         comp = compare_target_with_average(pdf, code)
@@ -350,4 +388,4 @@ diag = pd.DataFrame({
 })
 st.dataframe(diag, use_container_width=True, hide_index=True)
 st.divider()
-st.caption("ValueStock AI V17.1：行业自适应估值 + TTM/正常化EPS + 盈利兑现 + 成长质量动态PE + 绝对/相对估值 + 历史估值 + 自动同行 + 综合投资决策")
+st.caption("ValueStock AI V17.2：行业自适应估值 + TTM/正常化EPS + 盈利兑现 + 成长质量动态PE + 绝对/相对估值 + 历史估值 + 自动同行 + PE/PB估值透明度 + 安全边际 + 综合投资决策")
