@@ -1,6 +1,6 @@
 """
 ValueStock AI
-同行业比较模块 V2.0
+同行业比较模块 V2.1
 """
 
 from __future__ import annotations
@@ -51,10 +51,12 @@ def calculate_peer_score(df, target_code):
         reset_relative_valuation()
         return {"score": 0, "rating": "数据不足", "details": [], "relative_valuation": {}}
 
-    target = df[df["代码"] == target_code].iloc[0]
     total_score = 0.0
     details = []
+    available_weight = 0.0
 
+    # 同行竞争力：目标公司与同行一起排名；缺失指标时按实际可用权重重新归一化，
+    # 避免某一数据源暂时缺失导致公司被无理由扣分。
     for column, ascending, max_score in [
         ("ROE", False, 30),
         ("营收增长率", False, 20),
@@ -71,9 +73,14 @@ def calculate_peer_score(df, target_code):
         rank = int(row["_排名"].iloc[0])
         score = safe_rank_score(rank, len(rank_df), max_score)
         total_score += score
+        available_weight += max_score
         details.append({"指标": column, "排名": rank, "得分": round(score, 1)})
 
-    total_score = round(total_score)
+    if available_weight > 0:
+        total_score = round(total_score / available_weight * 100)
+    else:
+        total_score = 0
+
     rating = "优秀" if total_score >= 85 else "良好" if total_score >= 70 else "一般" if total_score >= 55 else "偏弱"
 
     LAST_RELATIVE_VALUATION = calculate_relative_valuation(df, target_code)
@@ -81,14 +88,26 @@ def calculate_peer_score(df, target_code):
     return {"score": total_score, "rating": rating, "details": details, "relative_valuation": LAST_RELATIVE_VALUATION}
 
 
-def build_peer_summary(df):
+def _peer_only(df, exclude_code=None):
     if df is None or df.empty:
         return pd.DataFrame()
+    data = df.copy()
+    if exclude_code is not None and "代码" in data.columns:
+        data = data[data["代码"] != exclude_code]
+    return data
+
+
+def build_peer_summary(df, exclude_code=None):
+    """统计纯同行样本，不把目标公司混入“同行平均/中位”。"""
+    data = _peer_only(df, exclude_code=exclude_code)
+    if data.empty:
+        return pd.DataFrame()
+
     rows = []
     for column in ["ROE", "营收增长率", "净利润增长率", "资产负债率", "PE", "PB"]:
-        if column not in df.columns:
+        if column not in data.columns:
             continue
-        series = pd.to_numeric(df[column], errors="coerce").dropna()
+        series = pd.to_numeric(data[column], errors="coerce").dropna()
         if series.empty:
             continue
         rows.append({"指标": column, "同行平均": round(float(series.mean()), 2), "同行中位": round(float(series.median()), 2)})
@@ -103,6 +122,9 @@ def compare_target_with_average(df, target_code):
     if target_rows.empty:
         return result
     target = target_rows.iloc[0]
+    peers = _peer_only(df, exclude_code=target_code)
+    if peers.empty:
+        return result
 
     for metric, direction in [
         ("ROE", "higher_better"),
@@ -112,9 +134,9 @@ def compare_target_with_average(df, target_code):
         ("PE", "lower_better"),
         ("PB", "lower_better"),
     ]:
-        if metric not in df.columns:
+        if metric not in peers.columns:
             continue
-        series = pd.to_numeric(df[metric], errors="coerce").dropna()
+        series = pd.to_numeric(peers[metric], errors="coerce").dropna()
         target_value = pd.to_numeric(target.get(metric), errors="coerce")
         if series.empty or pd.isna(target_value):
             continue
