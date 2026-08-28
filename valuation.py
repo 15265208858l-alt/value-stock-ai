@@ -1,9 +1,10 @@
 """
 ValueStock AI
-估值计算模块 V16.8
+估值计算模块 V17.2
 
-说明：主程序现在直接传入“估值用EPS”（正常化EPS/年度EPS），
-本模块不再偷偷二次调整EPS，避免V16.8盈利兑现系数被重复应用。
+说明：主程序直接传入“估值用EPS”（正常化EPS/年度EPS），
+本模块不再偷偷二次调整EPS，避免盈利兑现系数被重复应用。
+V17.2新增：返回PE/PB两条估值路径的中间结果，便于解释最终合理价由什么构成。
 """
 
 
@@ -78,4 +79,16 @@ def calculate_valuation_scenarios(
         "optimistic": values[2],
         "entry_price": zone["entry_price"],
         "heavy_price": zone["heavy_price"],
+        "pe_values": {
+            "conservative": pe_values[0],
+            "normal": pe_values[1],
+            "optimistic": pe_values[2],
+        },
+        "pb_values": {
+            "conservative": pb_values[0],
+            "normal": pb_values[1],
+            "optimistic": pb_values[2],
+        },
+        "pe_weight": float(pe_weight),
+        "pb_weight": float(pb_weight),
     }
