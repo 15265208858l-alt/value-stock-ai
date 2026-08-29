@@ -1,10 +1,12 @@
 """
 ValueStock AI
-估值计算模块 V17.2
+估值计算模块 V18.0
 
-说明：主程序直接传入“估值用EPS”（正常化EPS/年度EPS），
-本模块不再偷偷二次调整EPS，避免盈利兑现系数被重复应用。
-V17.2新增：返回PE/PB两条估值路径的中间结果，便于解释最终合理价由什么构成。
+原则：
+1. 主程序直接传入估值用EPS，不重复应用盈利兑现系数。
+2. PE/PB两条路径分别计算，再按模型权重综合。
+3. 新增“历史盈利情景估值”：只使用已实现EPS序列计算CAGR，
+   未来价格只是情景敏感性分析，不作为事实预测。
 """
 
 
@@ -92,3 +94,73 @@ def calculate_valuation_scenarios(
         "pe_weight": float(pe_weight),
         "pb_weight": float(pb_weight),
     }
+
+
+def calculate_eps_cagr(trend, years=3):
+    """从已经实现的年度EPS序列计算历史CAGR；不足数据时返回None。"""
+    try:
+        if trend is None or trend.empty or "EPS" not in trend.columns:
+            return None
+        import pandas as pd
+        data = trend.copy()
+        if "报告期" in data.columns:
+            data["_date"] = pd.to_datetime(data["报告期"], errors="coerce")
+            data = data.sort_values("_date")
+        data["EPS"] = pd.to_numeric(data["EPS"], errors="coerce")
+        data = data.dropna(subset=["EPS"])
+        data = data[data["EPS"] > 0]
+        if len(data) < 2:
+            return None
+        use_n = min(len(data), int(years) + 1)
+        first = float(data.iloc[-use_n]["EPS"])
+        last = float(data.iloc[-1]["EPS"])
+        actual_years = use_n - 1
+        if first <= 0 or last <= 0 or actual_years <= 0:
+            return None
+        return (last / first) ** (1.0 / actual_years) - 1.0
+    except Exception:
+        return None
+
+
+def build_growth_sensitivity(
+    base_eps,
+    normal_pe,
+    years=3,
+    historical_cagr=None,
+    conservative_growth=None,
+    optimistic_growth=None,
+    max_growth=0.50,
+):
+    """构建历史盈利支持下的情景敏感性表。
+
+    增长率优先来自已实现EPS CAGR；保守/乐观只是在历史CAGR上下调整，
+    并设上限，避免模型为了抬高科技股估值而无限外推。
+    """
+    if base_eps is None or base_eps <= 0 or normal_pe is None or normal_pe <= 0:
+        return []
+    if historical_cagr is None:
+        return []
+
+    hist = max(-0.30, min(float(max_growth), float(historical_cagr)))
+    if conservative_growth is None:
+        conservative_growth = max(-0.20, hist - 0.10)
+    if optimistic_growth is None:
+        optimistic_growth = min(float(max_growth), hist + 0.10)
+
+    scenarios = [
+        ("保守", conservative_growth),
+        ("历史趋势", hist),
+        ("乐观", optimistic_growth),
+    ]
+    rows = []
+    for label, growth in scenarios:
+        eps_future = float(base_eps) * ((1.0 + float(growth)) ** int(years))
+        value = eps_future * float(normal_pe)
+        rows.append({
+            "情景": label,
+            "年化EPS增长假设": float(growth),
+            "第N年EPS": eps_future,
+            "第N年PE": float(normal_pe),
+            "第N年情景价值": value,
+        })
+    return rows
