@@ -4,7 +4,7 @@ import pandas as pd
 from data import clean_stock_code, load_stock_data, check_data_completeness, get_latest_price
 from financial import process_financial_indicators, calculate_financial_quality
 from risk import analyze_financial_risk
-from valuation import calculate_valuation_scenarios
+from valuation import calculate_valuation_scenarios, calculate_eps_cagr, build_growth_sensitivity
 from adaptive_valuation import detect_valuation_model, get_valuation_config
 from earnings_basis import build_earnings_basis
 from growth_quality import calculate_growth_quality, get_dynamic_growth_pe
@@ -51,8 +51,8 @@ def report_values(data):
 
 st.set_page_config(page_title="ValueStock AI", page_icon="📈", layout="wide")
 st.title("📈 ValueStock AI")
-st.subheader("A股长期价值投资分析系统 V17.2")
-st.caption("统一数据中心 + 财务质量 + 财务排雷 + 行业自适应估值 + TTM/正常化EPS + 成长质量 + 绝对/相对估值 + 历史估值 + 同行业比较 + 综合投资决策")
+st.subheader("A股长期价值投资分析系统 V18.0")
+st.caption("统一数据中心 + 财务质量 + 财务排雷 + 行业自适应估值 + 正常化EPS + 成长质量 + 历史盈利情景 + 同行业比较 + 综合投资决策")
 
 code_input = st.text_input("请输入目标股票代码", placeholder="例如：000938")
 peer_input = st.text_input("同行股票代码（自动识别失败时可手动输入2～5只）", placeholder="例如：300308,300502,601138")
@@ -159,8 +159,6 @@ override = st.selectbox("🧠 估值模型（默认自动识别，可手动调�
 model = detect_valuation_model(stock_code=code, override=override)
 cfg = dict(get_valuation_config(model, annual_roe=annual_roe))
 earn = build_earnings_basis(indicators=ind, annual_eps=annual_eps, operating_cashflow_ratio=cash_ratio, profit_growth=latest.get("profit_growth"))
-
-# 估值分母统一采用正常化EPS；历史PE仍使用年度EPS保持历史分位口径稳定。
 normalized_eps = earn.get("normalized_eps")
 valuation_eps = normalized_eps or annual_eps
 annual_pe = None if price is None or annual_eps is None or annual_eps <= 0 else price / annual_eps
@@ -206,16 +204,10 @@ if gq is not None:
 valuation_pe = None if price is None or valuation_eps is None or valuation_eps <= 0 else price / valuation_eps
 pb = None if price is None or annual_bvps is None or annual_bvps <= 0 else price / annual_bvps
 vr = calculate_valuation_scenarios(
-    eps=valuation_eps,
-    bvps=annual_bvps,
-    conservative_pe=cfg["conservative_pe"],
-    normal_pe=cfg["normal_pe"],
-    optimistic_pe=cfg["optimistic_pe"],
-    conservative_pb=cfg["conservative_pb"],
-    normal_pb=cfg["normal_pb"],
-    optimistic_pb=cfg["optimistic_pb"],
-    pe_weight=cfg["pe_weight"],
-    pb_weight=cfg["pb_weight"],
+    eps=valuation_eps, bvps=annual_bvps,
+    conservative_pe=cfg["conservative_pe"], normal_pe=cfg["normal_pe"], optimistic_pe=cfg["optimistic_pe"],
+    conservative_pb=cfg["conservative_pb"], normal_pb=cfg["normal_pb"], optimistic_pb=cfg["optimistic_pb"],
+    pe_weight=cfg["pe_weight"], pb_weight=cfg["pb_weight"],
 )
 a, b, c, d, e = st.columns(5)
 a.metric("当前PE（年度）", "暂无" if annual_pe is None else f"{annual_pe:.2f}")
@@ -225,7 +217,6 @@ d.metric("中性合理价", "暂无" if vr["normal"] is None else f"{vr['normal'
 e.metric("建仓参考价", "暂无" if vr["entry_price"] is None else f"{vr['entry_price']:.2f} 元")
 st.write(f"保守价值：{vr['conservative']:.2f} 元 ｜ 乐观价值：{vr['optimistic']:.2f} 元 ｜ 重仓参考价：{vr['heavy_price']:.2f} 元")
 
-# V17.2 估值透明度：把PE与PB两条路径拆开，避免用户只看到一个“黑箱目标价”。
 if vr.get("pe_values") or vr.get("pb_values"):
     st.caption("🔎 估值路径拆解")
     valuation_detail = pd.DataFrame({
@@ -238,7 +229,26 @@ if vr.get("pe_values") or vr.get("pb_values"):
     })
     st.dataframe(valuation_detail.round(2), use_container_width=True, hide_index=True)
 
-# 安全边际：用当前价格分别对比中性、建仓、重仓价格，形成明确的操作区间。
+# V18：历史盈利情景估值。增长率只来自已经实现的EPS CAGR，不使用未经验证的未来预测。
+historical_eps_cagr = calculate_eps_cagr(trend, years=3)
+if historical_eps_cagr is not None and valuation_eps is not None and cfg.get("normal_pe") is not None:
+    st.subheader("🧭 7.5 历史盈利情景估值")
+    st.caption("这不是预测价格，而是用过去已经实现的EPS增长速度做敏感性分析；PE固定采用当前模型的中性PE。")
+    rows = build_growth_sensitivity(
+        base_eps=valuation_eps,
+        normal_pe=cfg["normal_pe"],
+        years=3,
+        historical_cagr=historical_eps_cagr,
+    )
+    if rows:
+        st.metric("近3年历史EPS CAGR", f"{historical_eps_cagr * 100:+.1f}%")
+        scenario_df = pd.DataFrame(rows)
+        scenario_df["年化EPS增长假设"] = scenario_df["年化EPS增长假设"] * 100
+        st.dataframe(scenario_df.round(2), use_container_width=True, hide_index=True)
+        st.caption("⚠️ 保守/历史趋势/乐观仅用于压力测试，不代表公司未来一定达到该增长率。")
+else:
+    st.caption("🧭 历史盈利情景估值：历史EPS样本不足，暂不外推。")
+
 if price is not None:
     normal_gap = None if vr.get("normal") is None else (vr["normal"] / price - 1) * 100
     entry_gap = None if vr.get("entry_price") is None else (vr["entry_price"] / price - 1) * 100
@@ -260,7 +270,6 @@ if price is not None:
     b.metric("建仓价安全边际", "暂无" if entry_gap is None else f"{entry_gap:+.1f}%")
     c.metric("重仓价安全边际", "暂无" if heavy_gap is None else f"{heavy_gap:+.1f}%")
     d.metric("安全边际状态", safety_label)
-
 st.caption(cfg["note"])
 
 # 8 历史估值
@@ -298,26 +307,27 @@ else:
 peer_score = None
 if len(peer_codes) >= 2:
     rows = []
-    for pc in [code] + peer_codes[:5]:
-        try:
-            pdta = data if pc == code else load_stock_data(pc)
-            if pdta is None or pdta.get("indicators") is None or pdta["indicators"].empty:
+    with st.spinner("正在加载同行公司数据……"):
+        for pc in [code] + peer_codes[:5]:
+            try:
+                pdta = data if pc == code else load_stock_data(pc)
+                if pdta is None or pdta.get("indicators") is None or pdta["indicators"].empty:
+                    continue
+                pfd = process_financial_indicators(pdta["indicators"])["annual"]
+                pm = pdta.get("market") or {}
+                pp = sf(pm.get("最新价")) or get_latest_price(pdta.get("history"))
+                pe = None if pp is None or pfd.get("eps") in {None, 0} else pp / pfd["eps"]
+                pbt = None if pp is None or pfd.get("bvps") in {None, 0} else pp / pfd["bvps"]
+                pname = pm.get("名称") or get_stock_name(pc) or pc
+                rows.append({"代码": pc, "名称": pname, "价格": pp, "ROE": pfd.get("roe"), "营收增长率": pfd.get("revenue_growth"), "净利润增长率": pfd.get("profit_growth"), "PE": pe, "PB": pbt})
+            except Exception:
                 continue
-            pfd = process_financial_indicators(pdta["indicators"])["annual"]
-            pm = pdta.get("market") or {}
-            pp = sf(pm.get("最新价")) or get_latest_price(pdta.get("history"))
-            pe = None if pp is None or pfd.get("eps") in {None, 0} else pp / pfd["eps"]
-            pbt = None if pp is None or pfd.get("bvps") in {None, 0} else pp / pfd["bvps"]
-            pname = pm.get("名称") or get_stock_name(pc) or pc
-            rows.append({"代码": pc, "名称": pname, "价格": pp, "ROE": pfd.get("roe"), "营收增长率": pfd.get("revenue_growth"), "净利润增长率": pfd.get("profit_growth"), "PE": pe, "PB": pbt})
-        except Exception:
-            continue
     if len(rows) >= 2:
         pdf = pd.DataFrame(rows)
         st.dataframe(pdf.round(2), use_container_width=True, hide_index=True)
-        # “同行平均/中位”严格排除目标公司，避免目标公司自己参与自己的横向基准。
         summ = build_peer_summary(pdf, exclude_code=code)
         if summ is not None and not summ.empty:
+            st.caption("同行平均/中位数：已排除目标公司")
             st.dataframe(summ, use_container_width=True, hide_index=True)
         comp = compare_target_with_average(pdf, code)
         if comp:
@@ -337,11 +347,8 @@ if len(peer_codes) >= 2:
 st.header("🏆 十、综合投资价值评分")
 gap = None if price is None or vr["normal"] is None or vr["normal"] <= 0 else (vr["normal"] / price - 1) * 100
 score = calculate_investment_score(
-    financial_score=fq["score"],
-    peer_score=peer_score,
-    valuation_gap=gap,
-    risk_score=risk_score,
-    historical_percentile=hs.get("percentile"),
+    financial_score=fq["score"], peer_score=peer_score, valuation_gap=gap,
+    risk_score=risk_score, historical_percentile=hs.get("percentile"),
 )
 a, b = st.columns(2)
 a.metric("投资价值评分", f"{score['score']}/100")
@@ -388,4 +395,4 @@ diag = pd.DataFrame({
 })
 st.dataframe(diag, use_container_width=True, hide_index=True)
 st.divider()
-st.caption("ValueStock AI V17.2：行业自适应估值 + TTM/正常化EPS + 盈利兑现 + 成长质量动态PE + 绝对/相对估值 + 历史估值 + 自动同行 + PE/PB估值透明度 + 安全边际 + 综合投资决策")
+st.caption("ValueStock AI V18.0：行业自适应估值 + 正常化EPS + 盈利兑现 + 成长质量动态PE + 历史盈利CAGR情景 + 绝对/相对估值 + 历史估值 + 自动同行 + PE/PB估值透明度 + 安全边际 + 综合投资决策")
