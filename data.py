@@ -7,6 +7,7 @@ Work OS 共享调用增强版：
 4. 行情/历史数据增加 Sina/Tencent 备用链路
 5. 诊断只报告最终未解决的问题；主数据源失败但备用源成功时显示为“已恢复”
 6. V17.1.1：三大财务报表并行加载，降低同行比较阶段的等待时间
+7. V18 UI bootstrap：从首个已导入模块注入产品视觉层，避免依赖 sitecustomize
 """
 
 import time
@@ -17,6 +18,101 @@ import akshare as ak
 
 _LAST_ERRORS = {}
 _SOURCE_STATUS = {}
+
+
+def _install_ui_bootstrap():
+    """在不改变投资计算逻辑的前提下，把品牌UI注入主程序。
+
+    app.py 会在导入 data.py 后调用 st.set_page_config；因此这里仅做函数包装，
+    等主程序正式调用 set_page_config 后再渲染 CSS 和首页品牌区。
+    """
+    try:
+        import streamlit as st
+        if getattr(st, "_valuestock_ui_bootstrapped", False):
+            return
+        original_set_page_config = st.set_page_config
+        state = {"rendered": False}
+
+        css = r'''
+        <style>
+        :root{
+          --vs-navy:#14233b; --vs-blue:#2e5a87; --vs-gold:#b8872d;
+          --vs-bg:#eef2f6; --vs-card:#ffffff; --vs-border:#d7dee8; --vs-muted:#66758a;
+        }
+        .stApp,[data-testid="stAppViewContainer"]{background:var(--vs-bg);}
+        [data-testid="stHeader"]{background:rgba(238,242,246,.96);}
+        .block-container{max-width:1360px;padding-top:1.2rem;padding-bottom:3rem;}
+        h1,h2,h3{color:var(--vs-navy)!important;}
+        h1{font-size:2rem!important;}
+        h2{font-size:1.3rem!important;margin-top:1.25rem!important;padding-bottom:.45rem;border-bottom:1px solid var(--vs-border);}
+        [data-testid="stMetric"]{background:#fff;border:1px solid var(--vs-border);border-radius:16px;padding:14px 16px;box-shadow:0 4px 16px rgba(20,35,59,.045);}
+        [data-testid="stMetricLabel"]{color:var(--vs-muted)!important;}
+        [data-testid="stMetricValue"]{color:var(--vs-navy)!important;font-weight:800;}
+        div[data-testid="stDataFrame"]{border:1px solid var(--vs-border);border-radius:14px;overflow:hidden;background:#fff;}
+        .stTextInput input,.stSelectbox>div>div{border-radius:12px!important;}
+        button[kind="primary"]{border-radius:12px!important;font-weight:800!important;box-shadow:0 6px 18px rgba(184,135,45,.20);}
+        .vs-topbar{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:10px 2px 14px;}
+        .vs-brand-wrap{display:flex;align-items:center;gap:14px;}
+        .vs-logo{width:50px;height:50px;border-radius:14px;background:linear-gradient(145deg,#14233b,#2e5a87);display:flex;align-items:center;justify-content:center;color:#f4d58f;font-weight:900;font-size:17px;box-shadow:0 8px 22px rgba(20,35,59,.18);}
+        .vs-brand{font-size:1.65rem;font-weight:850;color:var(--vs-navy);line-height:1.0;}
+        .vs-brand-sub{font-size:.82rem;color:var(--vs-muted);margin-top:6px;}
+        .vs-status{background:#f4ead7;color:#7d5a16;border:1px solid #e7d5ae;border-radius:999px;padding:6px 11px;font-size:.78rem;font-weight:700;}
+        .vs-hero{background:linear-gradient(135deg,#14233b 0%,#274b72 64%,#b8872d 100%);color:#fff;border-radius:24px;padding:34px 36px;margin:4px 0 18px;box-shadow:0 14px 34px rgba(20,35,59,.18);}
+        .vs-hero-title{font-size:2.45rem;font-weight:900;}
+        .vs-hero-sub{font-size:1.05rem;opacity:.94;margin-top:7px;}
+        .vs-hero-slogan{font-size:1.18rem;margin-top:16px;font-weight:650;}
+        .vs-chip-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px;}
+        .vs-chip{display:inline-flex;padding:6px 11px;border:1px solid rgba(255,255,255,.22);border-radius:999px;background:rgba(255,255,255,.08);font-size:.8rem;}
+        .vs-search{background:#fff;border:1px solid var(--vs-border);border-radius:18px;padding:18px 20px;margin-bottom:18px;box-shadow:0 6px 20px rgba(20,35,59,.06);}
+        .vs-card{background:#fff;border:1px solid var(--vs-border);border-radius:18px;padding:18px 20px;margin:10px 0;box-shadow:0 5px 18px rgba(20,35,59,.05);}
+        .vs-card-title{font-size:1rem;font-weight:800;color:var(--vs-navy);margin-bottom:8px;}
+        .vs-muted{color:var(--vs-muted);font-size:.84rem;}
+        section[data-testid="stSidebar"]{background:#152740;}
+        </style>
+        '''
+
+        hero = '''
+        <div class="vs-topbar">
+          <div class="vs-brand-wrap">
+            <div class="vs-logo">A股</div>
+            <div>
+              <div class="vs-brand">A股价值研投</div>
+              <div class="vs-brand-sub">ValueStock AI · A股长期价值投资研究平台</div>
+            </div>
+          </div>
+          <div class="vs-status">🟢 研究系统运行中</div>
+        </div>
+        <div class="vs-hero">
+          <div class="vs-hero-title">让AI帮你看懂一家A股公司</div>
+          <div class="vs-hero-sub">财务质量 · 现金流 · 估值 · 历史估值 · 同行业 · 风险排查</div>
+          <div class="vs-hero-slogan">用AI研究价值，而不是追逐情绪。</div>
+          <div class="vs-chip-row">
+            <span class="vs-chip">长期价值投资</span>
+            <span class="vs-chip">正常化EPS</span>
+            <span class="vs-chip">行业自适应估值</span>
+            <span class="vs-chip">安全边际</span>
+          </div>
+        </div>
+        '''
+
+        def patched_set_page_config(*args, **kwargs):
+            result = original_set_page_config(*args, **kwargs)
+            if not state["rendered"]:
+                state["rendered"] = True
+                try:
+                    st.markdown(css, unsafe_allow_html=True)
+                    st.markdown(hero, unsafe_allow_html=True)
+                except Exception:
+                    pass
+            return result
+
+        st.set_page_config = patched_set_page_config
+        st._valuestock_ui_bootstrapped = True
+    except Exception:
+        pass
+
+
+_install_ui_bootstrap()
 
 
 def _record_error(module, exc):
@@ -282,8 +378,6 @@ def load_stock_data(stock_code):
         "cashflow": None,
     }
 
-    # 三张报表彼此独立，改为并行请求。
-    # 同行业比较时会加载多只股票，这能显著减少串行等待。
     report_types = ["利润表", "资产负债表", "现金流量表"]
     with ThreadPoolExecutor(max_workers=3) as executor:
         futures = [executor.submit(_load_report_pair, stock_code, report_type) for report_type in report_types]
