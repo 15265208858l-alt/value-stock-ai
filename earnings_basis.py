@@ -1,5 +1,6 @@
-"""ValueStock AI - 盈利基础 V18.1
+"""ValueStock AI - 盈利基础 V18.2
 修复季度累计EPS与TTM错配；优先使用东方财富按报告期的基本EPS。
+关键修复：自动读取 adaptive_valuation 当前研究股票代码，避免因 indicators 不含代码列而无法刷新数据。
 """
 from __future__ import annotations
 import pandas as pd
@@ -32,6 +33,8 @@ def _find(df, names):
 
 
 def _code(df):
+    if df is None or df.empty:
+        return None
     c = _find(df, ["SECURITY_CODE", "股票代码", "代码", "SECUCODE"])
     if c is None:
         return None
@@ -42,18 +45,30 @@ def _code(df):
     return None
 
 
-def _refresh(indicators):
-    if ak is None or indicators is None or indicators.empty:
+def _current_stock_code():
+    """优先读取本次研究已由 adaptive_valuation 锁定的股票代码。"""
+    try:
+        import adaptive_valuation
+        code = str(getattr(adaptive_valuation, "LAST_STOCK_CODE", "") or "").strip()
+        if len(code) == 6 and code.isdigit():
+            return code
+    except Exception:
+        pass
+    return None
+
+
+def _refresh(indicators, stock_code=None):
+    if ak is None:
         return indicators
-    code = _code(indicators)
+    code = stock_code or _code(indicators) or _current_stock_code()
     if not code:
         return indicators
     suffix = ".SH" if code.startswith(("6", "68")) else ".SZ" if code.startswith(("0", "3")) else ".BJ"
+    fn = getattr(ak, "stock_financial_analysis_indicator_em", None)
+    if fn is None:
+        return indicators
     for symbol in [f"{code}{suffix}", code, f"{suffix[1:]}{code}"]:
         try:
-            fn = getattr(ak, "stock_financial_analysis_indicator_em", None)
-            if fn is None:
-                break
             x = fn(symbol=symbol, indicator="按报告期")
             if x is not None and not x.empty and "REPORT_DATE" in x.columns and any(c in x.columns for c in ["EPSJB", "基本每股收益(元)"]):
                 return x.copy()
@@ -88,7 +103,7 @@ def calculate_earnings_realization_score(operating_cashflow_ratio=None, profit_g
     return {"score": round(score), "coefficient": round(coeff, 3), "level": level}
 
 
-def build_earnings_basis(indicators, annual_eps=None, operating_cashflow_ratio=None, profit_growth=None):
+def build_earnings_basis(indicators, annual_eps=None, operating_cashflow_ratio=None, profit_growth=None, stock_code=None):
     result = {
         "annual_eps": _safe_float(annual_eps),
         "latest_eps": None,
@@ -109,7 +124,7 @@ def build_earnings_basis(indicators, annual_eps=None, operating_cashflow_ratio=N
         result.update(realization_score=r["score"], realization_coefficient=r["coefficient"], realization_level=r["level"])
         return result
 
-    df = _refresh(indicators)
+    df = _refresh(indicators, stock_code=stock_code)
     date_col = _find(df, ["REPORT_DATE", "日期", "报告期", "报告日期", "截止日期"])
     eps_col = _find(df, ["EPSJB", "基本每股收益(元)", "基本每股收益", "摊薄每股收益(元)", "摊薄每股收益", "每股收益(元)", "每股收益"])
     if date_col is None or eps_col is None:
