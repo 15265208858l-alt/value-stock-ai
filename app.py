@@ -58,48 +58,33 @@ st.markdown("""
  [data-testid="stMetricValue"]{font-size:1.15rem!important}
  button[kind="primary"]{width:100%!important;min-height:46px!important}
  .stTextInput input{font-size:16px!important}
- .vs-topbar{padding-bottom:8px!important}.vs-brand{font-size:1.25rem!important}.vs-logo{width:42px!important;height:42px!important}
- .vs-hero{padding:22px 18px!important;border-radius:18px!important}.vs-hero-title{font-size:1.65rem!important}.vs-hero-sub{font-size:.88rem!important}.vs-hero-slogan{font-size:1rem!important}
 }
 </style>
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="vs-search-title">🔎 研究一家A股公司</div><div class="vs-search-sub">输入股票代码，快速查看企业质量、估值、安全边际与投资决策。</div><div class="vs-mobile-note">📱 手机端已优化：结论优先，详细数据向下展开。</div>', unsafe_allow_html=True)
-
 code_input = st.text_input("A股股票代码", placeholder="例如：000333", label_visibility="collapsed")
 peer_input = st.text_input("同行股票代码", placeholder="同行可选填，例如：000651,600690", label_visibility="collapsed")
 run = st.button("🔍 开始价值研究", type="primary", use_container_width=True)
-
 if not run:
     st.markdown('<div class="vs-explain">📊 基本面分析　　💰 AI估值　　🛡️ 风险排查　　🏭 同行业比较<br><br>系统将从企业质量、现金流、正常化EPS、PE/PB、历史估值、同行估值和安全边际等维度进行研究。</div>', unsafe_allow_html=True)
     st.stop()
 
 code = clean_stock_code(code_input)
-if not code:
-    st.error("❌ 请输入6位数字股票代码")
-    st.stop()
+if not code: st.error("❌ 请输入6位数字股票代码"); st.stop()
+with st.spinner("正在加载A股数据……"): data = load_stock_data(code)
+if data is None: st.error("❌ 股票数据加载失败"); st.stop()
 
-with st.spinner("正在加载A股数据……"):
-    data = load_stock_data(code)
-if data is None:
-    st.error("❌ 股票数据加载失败")
-    st.stop()
-
-# 1 数据中心
 st.header("📡 一、数据中心")
-dc = check_data_completeness(data)
-a,b,c = st.columns(3); a.metric("数据完整度",f"{dc['score']}%"); b.metric("已获取模块",f"{dc['available']}/{dc['total']}"); c.metric("数据质量",dc["level"])
+dc=check_data_completeness(data); a,b,c=st.columns(3); a.metric("数据完整度",f"{dc['score']}%"); b.metric("已获取模块",f"{dc['available']}/{dc['total']}"); c.metric("数据质量",dc["level"])
 
-# 2 行情
 st.header("📌 二、目标公司行情")
 m,h=data.get("market"),data.get("history"); name=code; price=chg=dyn_pe=None
-if m:
-    name=m.get("名称",code); price=sf(m.get("最新价")); chg=sf(m.get("涨跌幅")); dyn_pe=sf(m.get("市盈率-动态"))
+if m: name=m.get("名称",code); price=sf(m.get("最新价")); chg=sf(m.get("涨跌幅")); dyn_pe=sf(m.get("市盈率-动态"))
 if price is None: price=get_latest_price(h)
 a,b,c,d=st.columns(4); a.metric("股票名称",name); b.metric("当前价格","暂无" if price is None else f"{price:.2f} 元"); c.metric("涨跌幅","暂无" if chg is None else f"{chg:.2f}%"); d.metric("动态PE","暂无" if dyn_pe is None else f"{dyn_pe:.2f}")
 st.success("✅ 历史行情获取成功" if h is not None else "⚠️ 历史行情暂时无法获取")
 
-# 3 财务
 st.header("📊 三、财务分析")
 ind=data.get("indicators")
 if ind is None or ind.empty: st.error("❌ 财务指标获取失败"); st.stop()
@@ -108,23 +93,19 @@ annual_roe=annual.get("roe"); annual_eps=annual.get("eps"); annual_bvps=annual.g
 a,b,c,d=st.columns(4); a.metric("最新ROE","暂无" if latest.get("roe") is None else f"{latest['roe']:.2f}%"); b.metric("营收增长","暂无" if latest.get("revenue_growth") is None else f"{latest['revenue_growth']:.2f}%"); c.metric("净利润增长","暂无" if latest.get("profit_growth") is None else f"{latest['profit_growth']:.2f}%"); d.metric("资产负债率","暂无" if latest.get("debt") is None else f"{latest['debt']:.2f}%")
 a,b,c,d=st.columns(4); a.metric("年度ROE","暂无" if annual_roe is None else f"{annual_roe:.2f}%"); b.metric("年度EPS","暂无" if annual_eps is None else f"{annual_eps:.2f} 元"); c.metric("年度BPS","暂无" if annual_bvps is None else f"{annual_bvps:.2f} 元"); d.metric("年度负债率","暂无" if annual_debt is None else f"{annual_debt:.2f}%")
 
-# 4 报表
 st.header("💰 四、三大报表")
-rv=report_values(data); a,b,c,d,e=st.columns(5); a.metric("营业收入",money(rv["revenue"])); b.metric("净利润",money(rv["net_profit"])); c.metric("经营现金流",money(rv["ocf"])); d.metric("应收账款",money(rv["receivable"])); e.metric("存货",money(rv["inventory"])
+rv=report_values(data); a,b,c,d,e=st.columns(5); a.metric("营业收入",money(rv["revenue"])); b.metric("净利润",money(rv["net_profit"])); c.metric("经营现金流",money(rv["ocf"])); d.metric("应收账款",money(rv["receivable"])); e.metric("存货",money(rv["inventory"]))
 
-# 5 风险
 st.header("🚨 五、财务排雷")
 risk=analyze_financial_risk(rv["ocf"],rv["net_profit"],rv["receivable"],rv["revenue"],rv["inventory"],annual_roe,annual_debt); risk_score=risk.get("score",5); st.metric("财务风险评分",f"{risk_score}/10")
 for x in risk.get("risk_items",[]): st.warning(f"⚠️ {x}")
 if not risk.get("risk_items"): st.success("✅ 暂未发现明显财务风险")
 cash_ratio=None if rv["ocf"] is None or rv["net_profit"] in {None,0} else rv["ocf"]/rv["net_profit"]
 
-# 6 财务质量
 st.header("📈 六、5年财务质量")
 fq=calculate_financial_quality(trend,cash_ratio); a,b=st.columns(2); a.metric("财务质量评分",f"{fq['score']}/100"); b.metric("财务质量评级",fq["rating"])
 if trend is not None and not trend.empty: st.dataframe(trend,use_container_width=True,hide_index=True)
 
-# 7 当前估值
 st.header("💰 七、当前价值估值")
 override=st.selectbox("🧠 估值模型（默认自动识别，可手动调整）",["自动识别","普通成长/制造","成长科技","银行","保险","券商","周期"],index=0)
 model=detect_valuation_model(stock_code=code,override=override); cfg=dict(get_valuation_config(model,annual_roe=annual_roe))
@@ -147,20 +128,17 @@ st.write(f"保守价值：{vr['conservative']:.2f} 元 ｜ 乐观价值：{vr['o
 if vr.get("pe_values") or vr.get("pb_values"):
     st.caption("🔎 估值路径拆解"); st.dataframe(pd.DataFrame({"情景":["保守","中性","乐观"],"PE路径价值":[vr.get("pe_values",{}).get("conservative"),vr.get("pe_values",{}).get("normal"),vr.get("pe_values",{}).get("optimistic")],"PB路径价值":[vr.get("pb_values",{}).get("conservative"),vr.get("pb_values",{}).get("normal"),vr.get("pb_values",{}).get("optimistic")],"综合价值":[vr.get("conservative"),vr.get("normal"),vr.get("optimistic")] }).round(2),use_container_width=True,hide_index=True)
 
-# 7.5
 historical_eps_cagr=calculate_eps_cagr(trend,years=3)
 if historical_eps_cagr is not None and valuation_eps is not None and cfg.get("normal_pe") is not None:
     st.subheader("🧭 7.5 历史盈利情景估值"); st.caption("这不是预测价格，而是用过去已经实现的EPS增长速度做敏感性分析；PE固定采用当前模型的中性PE。"); rows=build_growth_sensitivity(base_eps=valuation_eps,normal_pe=cfg["normal_pe"],years=3,historical_cagr=historical_eps_cagr)
     if rows: st.metric("近3年历史EPS CAGR",f"{historical_eps_cagr*100:+.1f}%"); scenario_df=pd.DataFrame(rows); scenario_df["年化EPS增长假设"]=scenario_df["年化EPS增长假设"]*100; st.dataframe(scenario_df.round(2),use_container_width=True,hide_index=True); st.caption("⚠️ 保守/历史趋势/乐观仅用于压力测试，不代表公司未来一定达到该增长率。")
 else: st.caption("🧭 历史盈利情景估值：历史EPS样本不足，暂不外推。")
 
-# 8
 st.header("📊 八、历史PE估值"); hist_level=get_historical_valuation_level(hs.get("percentile"))
 if hist is not None and not hist.empty:
     st.dataframe(hist.round(2),use_container_width=True,hide_index=True); a,b,c=st.columns(3); a.metric("历史最低PE","暂无" if hs.get("min") is None else f"{hs['min']:.2f}"); b.metric("历史中位PE","暂无" if hs.get("median") is None else f"{hs['median']:.2f}"); c.metric("历史最高PE","暂无" if hs.get("max") is None else f"{hs['max']:.2f}"); a,b,c=st.columns(3); a.metric("历史25%分位","暂无" if hs.get("q25") is None else f"{hs['q25']:.2f}"); b.metric("历史75%分位","暂无" if hs.get("q75") is None else f"{hs['q75']:.2f}"); c.metric("当前PE历史分位","暂无" if hs.get("percentile") is None else f"{hs['percentile']:.1f}%"); st.write(f"**历史估值区域：{hist_level}**")
 else: st.warning("⚠️ 历史PE数据不足")
 
-# 9
 st.header("🏭 九、同行业比较"); auto=get_peer_candidates(code,max_peers=5); peer_codes=auto.get("peers",[]) if auto else []
 if not peer_codes and code=="601318": peer_codes=["601601","601336"]; auto={"industry":"保险"}
 if not peer_codes and peer_input: peer_codes=[clean_stock_code(x) for x in peer_input.split(",") if clean_stock_code(x) and clean_stock_code(x)!=code]
@@ -186,7 +164,6 @@ if len(peer_codes)>=2:
         if rel.get("available"):
             ra,rb,rc=st.columns(3); ra.metric("同行PE中位数","暂无" if rel.get("peer_median_pe") is None else f"{rel['peer_median_pe']:.2f}倍"); rb.metric("同行PB中位数","暂无" if rel.get("peer_median_pb") is None else f"{rel['peer_median_pb']:.2f}倍"); rc.metric("相对估值判断",rel.get("level","数据不足")); st.caption(f"目标PE/同行中位PE：{rel.get('pe_ratio','暂无')}｜目标PB/同行中位PB：{rel.get('pb_ratio','暂无')}")
 
-# 10
 st.header("🏆 十、综合投资价值评分"); gap=None if price is None or vr["normal"] is None or vr["normal"]<=0 else (vr["normal"]/price-1)*100
 score=calculate_investment_score(financial_score=fq["score"],peer_score=peer_score,valuation_gap=gap,risk_score=risk_score,historical_percentile=hs.get("percentile"),)
 a,b=st.columns(2); a.metric("投资价值评分",f"{score['score']}/100"); b.metric("投资评级",score["rating"])
@@ -194,20 +171,14 @@ st.dataframe(pd.DataFrame({"分析维度":["财务质量","同行竞争力","当
 st.write(f"当前估值判断：**{score['valuation_level']}**"); st.write(f"历史估值判断：**{score['historical_level']}**"); st.write(f"风险判断：**{score['risk_level']}**")
 if score.get("relative_valuation_available"): st.write(f"同行相对估值：**{score['relative_valuation_level']}**｜同行PE中位数 {score.get('peer_median_pe','暂无')}倍｜目标PE/同行中位 {score.get('relative_pe_ratio','暂无')}")
 
-# 11
 st.header("🎯 十一、最终投资决策"); decision=make_investment_decision(investment_score=score["score"],valuation_level=score["valuation_level"],historical_level=score["historical_level"],risk_level=score["risk_level"])
 a,b,c=st.columns(3); a.metric("投资决策",decision["decision"]); b.metric("建议操作",decision["action"]); c.metric("建议仓位",decision["position"]); st.info("💡 决策理由："+decision["reason"])
 
 # 核心研究结论：复用已经计算出的结果，不参与任何计算
-st.markdown('<div class="vs-core"><div class="vs-core-title">🎯 核心研究结论</div></div>', unsafe_allow_html=True)
-summary_cols=st.columns(4)
-summary_cols[0].metric("综合评分",f"{score['score']}/100")
-summary_cols[1].metric("中性合理价","暂无" if vr.get("normal") is None else f"{vr['normal']:.2f} 元")
-summary_cols[2].metric("当前价格","暂无" if price is None else f"{price:.2f} 元")
-summary_cols[3].metric("安全边际","暂无" if gap is None else f"{gap:+.1f}%")
+st.markdown('<div class="vs-core"><div class="vs-core-title">🎯 核心研究结论</div></div>',unsafe_allow_html=True)
+summary_cols=st.columns(4); summary_cols[0].metric("综合评分",f"{score['score']}/100"); summary_cols[1].metric("中性合理价","暂无" if vr.get("normal") is None else f"{vr['normal']:.2f} 元"); summary_cols[2].metric("当前价格","暂无" if price is None else f"{price:.2f} 元"); summary_cols[3].metric("安全边际","暂无" if gap is None else f"{gap:+.1f}%")
 st.markdown(f'<div class="vs-company">{name} <span class="vs-badge">{score["rating"]}</span></div><div class="vs-explain">最终建议：<b>{decision["decision"]}</b>　｜　操作：{decision["action"]}　｜　仓位：{decision["position"]}<br>估值：{score["valuation_level"]}　｜　历史估值：{score["historical_level"]}　｜　风险：{score["risk_level"]}</div>',unsafe_allow_html=True)
 
-# 12
 st.header("🏆 十二、最终投资结论")
 if score["score"]>=85: conclusion="🟢 公司质量与估值较匹配，值得重点研究。"
 elif score["score"]>=75: conclusion="🟢 公司质量较好，值得长期跟踪。"
@@ -219,7 +190,6 @@ if risk.get("risk_items"):
     st.subheader("⚠️ 核心风险")
     for x in risk["risk_items"]: st.write(f"- {x}")
 
-# 13
-st.header("🛠️ 系统诊断")
+st.header("🛠️ 十三、系统诊断")
 diag=pd.DataFrame({"模块":["data.py","financial.py","risk.py","valuation.py","adaptive_valuation.py","earnings_basis.py","growth_quality.py","historical_valuation.py","peer_compare.py","industry.py","investment_score.py","investment_decision.py"],"状态":["✅","✅","✅","✅","✅","✅" if earn.get("valuation_eps") is not None else "⏳","✅" if gq is not None else "⏳","✅" if hist is not None and not hist.empty else "⏳","✅" if peer_score is not None else "⏳","✅" if peer_codes else "⏳","✅","✅"]})
 st.dataframe(diag,use_container_width=True,hide_index=True); st.divider(); st.caption("A股价值研投｜ValueStock AI：行业自适应估值 + 正常化EPS + 盈利兑现 + 成长质量 + 历史盈利情景 + 同行比较 + 安全边际 + 综合投资决策")
