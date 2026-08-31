@@ -1,7 +1,6 @@
-"""ValueStock AI - 财务分析 V18.2
-核心原则：优先使用东方财富“按报告期”结构化指标；旧接口仅作兜底。
-重点修复：年度EPS/BPS错期、季度累计值误当年度值、保险/金融股指标异常。
-本版新增：process_financial_indicators 自动读取当前研究股票代码，确保刷新到正确报告期数据。
+"""ValueStock AI - 财务分析 V18.4
+核心原则：按报告期优先；EPS主数据源改为利润表-按报告期，财务指标仅作兜底。
+重点修复：年度EPS错期、季度累计值误当年度值、最近财报EPS口径不一致。
 """
 from __future__ import annotations
 import pandas as pd
@@ -55,27 +54,63 @@ def _current_stock_code():
     return None
 
 
+def _symbols(stock_code):
+    code = str(stock_code or "").strip()
+    if len(code) != 6 or not code.isdigit():
+        return []
+    if code.startswith(("6", "68")):
+        return [f"SH{code}", f"{code}.SH", code]
+    if code.startswith(("0", "3")):
+        return [f"SZ{code}", f"{code}.SZ", code]
+    return [f"BJ{code}", f"{code}.BJ", code]
+
+
 def _refresh_eastmoney(indicators, stock_code=None):
-    """刷新为东财按报告期数据。失败则返回原数据。"""
+    """刷新东财按报告期财务指标；失败则返回原数据。"""
     if ak is None or indicators is None or indicators.empty:
         return indicators
     code = stock_code or _extract_code(indicators) or _current_stock_code()
     if not code:
         return indicators
 
-    suffix = ".SH" if code.startswith(("6", "68")) else ".SZ" if code.startswith(("0", "3")) else ".BJ"
-    candidates = [f"{code}{suffix}", f"{code}", f"{suffix[1:]}{code}"]
-    for symbol in candidates:
+    fn = getattr(ak, "stock_financial_analysis_indicator_em", None)
+    if fn is None:
+        return indicators
+    for symbol in _symbols(code):
         try:
-            fn = getattr(ak, "stock_financial_analysis_indicator_em", None)
-            if fn is None:
-                break
             df = fn(symbol=symbol, indicator="按报告期")
             if df is not None and not df.empty and any(c in df.columns for c in ["EPSJB", "BPS", "REPORT_DATE"]):
                 return df.copy()
         except Exception:
             continue
     return indicators
+
+
+def _refresh_profit_report(stock_code=None):
+    """利润表-按报告期，专门用于EPS。"""
+    if ak is None:
+        return None
+    code = stock_code or _current_stock_code()
+    if not code:
+        return None
+    fn = getattr(ak, "stock_profit_sheet_by_report_em", None)
+    if fn is None:
+        return None
+    for symbol in _symbols(code):
+        try:
+            df = fn(symbol=symbol)
+            if df is None or df.empty:
+                continue
+            date_col = _find(df, ["REPORT_DATE", "报告日期", "报告期", "截止日期", "日期"])
+            eps_col = _find(df, [
+                "基本每股收益", "基本每股收益(元)", "基本每股收益（元）",
+                "每股收益", "每股收益(元)", "每股收益（元）", "EPSJB"
+            ])
+            if date_col and eps_col:
+                return df.copy()
+        except Exception:
+            continue
+    return None
 
 
 def _prepare(df):
@@ -95,12 +130,31 @@ def _value(row, df, candidates):
     return safe_float(row[col]) if col else None
 
 
+def _eps_series(df):
+    if df is None or df.empty:
+        return pd.DataFrame(columns=["_分析日期", "_EPS"])
+    date_col = _find(df, ["REPORT_DATE", "日期", "报告期", "报告日期", "截止日期"])
+    eps_col = _find(df, [
+        "基本每股收益", "基本每股收益(元)", "基本每股收益（元）",
+        "EPSJB", "每股收益", "每股收益(元)", "每股收益（元）",
+        "摊薄每股收益(元)", "摊薄每股收益"
+    ])
+    if date_col is None or eps_col is None:
+        return pd.DataFrame(columns=["_分析日期", "_EPS"])
+    x = df[[date_col, eps_col]].copy()
+    x["_分析日期"] = pd.to_datetime(x[date_col], errors="coerce")
+    x["_EPS"] = x[eps_col].apply(safe_float)
+    x = x.dropna(subset=["_分析日期", "_EPS"]).sort_values("_分析日期")
+    return x.drop_duplicates(subset=["_分析日期"], keep="last").reset_index(drop=True)[["_分析日期", "_EPS"]]
+
+
 def process_financial_indicators(indicators, stock_code=None):
     result = {"latest": {}, "annual": {}, "trend": pd.DataFrame()}
     if indicators is None or indicators.empty:
         return result
 
-    source = _refresh_eastmoney(indicators, stock_code=stock_code)
+    code = stock_code or _extract_code(indicators) or _current_stock_code()
+    source = _refresh_eastmoney(indicators, stock_code=code)
     df = _prepare(source)
     if df.empty:
         return result
@@ -116,12 +170,26 @@ def process_financial_indicators(indicators, stock_code=None):
     eps_cols = ["EPSJB", "基本每股收益(元)", "基本每股收益", "摊薄每股收益(元)", "摊薄每股收益", "每股收益(元)", "每股收益", "EPSXS"]
     bps_cols = ["BPS", "每股净资产(元)", "每股净资产", "每股净资产_调整后(元)", "每股净资产_调整后", "每股净资产_调整前(元)"]
 
+    # EPS单独使用利润表按报告期，避免财务指标接口出现错期。
+    eps_report = _refresh_profit_report(code)
+    eps_df = _eps_series(eps_report)
+    if eps_df.empty:
+        eps_df = _eps_series(source)
+
+    latest_eps = None
+    annual_eps = None
+    if not eps_df.empty:
+        latest_eps = safe_float(eps_df.iloc[-1]["_EPS"])
+        annual_eps_df = eps_df[eps_df["_分析日期"].dt.month == 12]
+        if not annual_eps_df.empty:
+            annual_eps = safe_float(annual_eps_df.iloc[-1]["_EPS"])
+
     result["latest"] = {
         "roe": _value(latest, df, roe_cols),
         "revenue_growth": _value(latest, df, rev_cols),
         "profit_growth": _value(latest, df, profit_cols),
         "debt": _value(latest, df, debt_cols),
-        "eps": _value(latest, df, eps_cols),
+        "eps": latest_eps if latest_eps is not None else _value(latest, df, eps_cols),
         "bvps": _value(latest, df, bps_cols),
     }
     result["annual"] = {
@@ -129,7 +197,7 @@ def process_financial_indicators(indicators, stock_code=None):
         "revenue_growth": _value(annual, df, rev_cols),
         "profit_growth": _value(annual, df, profit_cols),
         "debt": _value(annual, df, debt_cols),
-        "eps": _value(annual, df, eps_cols),
+        "eps": annual_eps if annual_eps is not None else _value(annual, df, eps_cols),
         "bvps": _value(annual, df, bps_cols),
     }
 
@@ -142,11 +210,22 @@ def process_financial_indicators(indicators, stock_code=None):
     out = pd.DataFrame({"报告期": trend[date_col].astype(str).values})
     for label, cols in [
         ("ROE", roe_cols), ("营收增长率", rev_cols), ("净利润增长率", profit_cols),
-        ("资产负债率", debt_cols), ("EPS", eps_cols), ("BPS", bps_cols)
+        ("资产负债率", debt_cols), ("BPS", bps_cols)
     ]:
         col = _find(trend, cols)
         if col:
             out[label] = pd.to_numeric(trend[col], errors="coerce").values
+
+    if not eps_df.empty:
+        annual_eps_trend = eps_df[eps_df["_分析日期"].dt.month == 12].tail(5).copy()
+        eps_map = {d.strftime("%Y-%m-%d"): e for d, e in zip(annual_eps_trend["_分析日期"], annual_eps_trend["_EPS"])}
+        out_dates = pd.to_datetime(out["报告期"], errors="coerce")
+        out["EPS"] = [eps_map.get(d.strftime("%Y-%m-%d")) if not pd.isna(d) else None for d in out_dates]
+    else:
+        col = _find(trend, eps_cols)
+        if col:
+            out["EPS"] = pd.to_numeric(trend[col], errors="coerce").values
+
     result["trend"] = out.reset_index(drop=True)
     return result
 
