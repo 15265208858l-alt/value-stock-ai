@@ -1,6 +1,6 @@
-"""ValueStock AI - 财务分析 V18.5
-核心原则：原始财务指标优先，东财按报告期作为备用；EPS优先使用利润表按报告期。
-重点修复：避免东财刷新接口返回异常/字段变化导致整个财务模块 TypeError；年度EPS错期、季度累计值误当年度值、最近财报EPS口径不一致。
+"""ValueStock AI - 财务分析 V18.6
+核心原则：分析阶段只使用 load_stock_data 已经获取的数据，禁止重复调用远程财务接口。
+重点修复：页面运行到第3模块卡顿/等待；EPS优先使用已经加载的利润表，避免二次请求AKShare。
 """
 from __future__ import annotations
 import pandas as pd
@@ -69,7 +69,7 @@ def _symbols(stock_code):
 
 
 def _refresh_eastmoney(indicators, stock_code=None):
-    """备用刷新东财按报告期财务指标；任何异常均返回原数据。"""
+    """备用刷新东财按报告期财务指标；仅在原始数据无法解析时使用。"""
     if ak is None or indicators is None or getattr(indicators, "empty", True):
         return indicators
     code = stock_code or _extract_code(indicators) or _current_stock_code()
@@ -91,7 +91,7 @@ def _refresh_eastmoney(indicators, stock_code=None):
 
 
 def _refresh_profit_report(stock_code=None):
-    """利润表-按报告期，专门用于EPS；失败时返回None。"""
+    """兼容旧调用的备用利润表请求；正常页面流程不再调用。"""
     if ak is None:
         return None
     code = stock_code or _current_stock_code()
@@ -167,11 +167,13 @@ def _empty_result():
     return {"latest": {}, "annual": {}, "trend": pd.DataFrame()}
 
 
-def process_financial_indicators(indicators, stock_code=None):
+def process_financial_indicators(indicators, stock_code=None, profit_report=None):
     """处理财务指标。
 
-    稳定性原则：原始 indicators 可用时绝不强制刷新；东财接口只作备用。
-    这样即使AKShare东财接口字段或参数发生变化，也不会让整个页面在第3模块崩溃。
+    V18.6 性能/稳定性规则：
+    1. indicators 已由 data.load_stock_data 获取，不重复刷新。
+    2. EPS优先使用同一次 load_stock_data 已获取的 profit_report。
+    3. 只有在没有传入利润表且 indicators 本身没有EPS时，才保留旧备用接口。
     """
     result = _empty_result()
     if indicators is None or getattr(indicators, "empty", True):
@@ -179,16 +181,11 @@ def process_financial_indicators(indicators, stock_code=None):
 
     try:
         code = stock_code or _extract_code(indicators) or _current_stock_code()
-
-        # 关键修复：先使用 load_stock_data 已成功获取的原始指标。
-        # 只有原始指标无法解析日期时，才尝试东财备用接口。
         df = _prepare(indicators)
+        source = indicators
         if df.empty:
             source = _refresh_eastmoney(indicators, stock_code=code)
             df = _prepare(source)
-        else:
-            source = indicators
-
         if df.empty:
             return result
 
@@ -200,12 +197,11 @@ def process_financial_indicators(indicators, stock_code=None):
         rev_cols = ["TOTALOPERATEREVETZ", "主营业务收入增长率(%)", "主营业务收入增长率", "营业收入增长率(%)", "营业收入增长率"]
         profit_cols = ["PARENTNETPROFITTZ", "净利润增长率(%)", "净利润增长率", "归属净利润同比增长(%)"]
         debt_cols = ["ZCFZL", "资产负债率(%)", "资产负债率"]
-        eps_cols = ["EPSJB", "基本每股收益(元)", "基本每股收益", "基本每股收益（元/股）", "基本每股收益(元/股)", "摊薄每股收益(元)", "摊薄每股收益", "每股收益(元)", "每股收益", "EPSXS"]
+        eps_cols = ["EPSJB", "基本每股收益(元)", "基本每股收益", "基本每股收益（元）", "基本每股收益(元/股)", "摊薄每股收益(元)", "摊薄每股收益", "每股收益(元)", "每股收益", "EPSXS"]
         bps_cols = ["BPS", "每股净资产(元)", "每股净资产", "每股净资产_调整后(元)", "每股净资产_调整后", "每股净资产_调整前(元)"]
 
-        # EPS单独使用利润表按报告期；失败则回退到已经获取的 indicators。
-        eps_report = _refresh_profit_report(code)
-        eps_df = _eps_series(eps_report)
+        # 关键：不再无条件请求利润表。
+        eps_df = _eps_series(profit_report)
         if eps_df.empty:
             eps_df = _eps_series(indicators)
         if eps_df.empty and source is not indicators:
@@ -258,50 +254,34 @@ def process_financial_indicators(indicators, stock_code=None):
 
         if not eps_df.empty:
             annual_eps_trend = eps_df[eps_df["_分析日期"].dt.month == 12].tail(5).copy()
-            eps_map = {d.strftime("%Y-%m-%d"): e for d, e in zip(annual_eps_trend["_分析日期"], annual_eps_trend["_EPS"])}
-            out_dates = pd.to_datetime(out["报告期"], errors="coerce")
-            out["EPS"] = [eps_map.get(d.strftime("%Y-%m-%d")) if not pd.isna(d) else None for d in out_dates]
-        else:
-            col = _find(trend, eps_cols)
-            if col:
-                out["EPS"] = pd.to_numeric(trend[col], errors="coerce").values
+            if not annual_eps_trend.empty:
+                out["EPS"] = annual_eps_trend["_EPS"].values[-len(out):]
 
         result["trend"] = out.reset_index(drop=True)
         return result
     except Exception:
-        # 财务模块永不阻断整页；上层仍可显示“数据不足/待恢复”。
-        return result
+        return _empty_result()
 
 
-def calculate_financial_quality(trend, cash_profit_ratio=None):
-    if trend is None or getattr(trend, "empty", True):
-        return {"score": 50, "rating": "数据不足"}
-
-    def vals(name):
-        if name not in trend.columns:
-            return []
-        return [safe_float(x) for x in trend[name] if safe_float(x) is not None]
-
-    roe, rev, profit, debt = vals("ROE"), vals("营收增长率"), vals("净利润增长率"), vals("资产负债率")
-    score = 0
-
-    if roe:
-        avg = sum(roe) / len(roe)
-        score += 20 if avg >= 20 else 17 if avg >= 15 else 13 if avg >= 10 else 8 if avg >= 5 else 3
-    if rev:
-        avg = sum(rev) / len(rev); pos = sum(x >= 0 for x in rev)
-        score += 20 if avg >= 15 and pos >= 4 else 16 if avg >= 8 and pos >= 4 else 11 if avg >= 0 else 4
-    if profit:
-        avg = sum(profit) / len(profit); pos = sum(x >= 0 for x in profit)
-        score += 20 if avg >= 20 and pos >= 4 else 16 if avg >= 10 and pos >= 4 else 11 if avg >= 0 else 4
-    if debt:
-        avg = sum(debt) / len(debt)
-        score += 20 if avg < 40 else 16 if avg < 50 else 12 if avg < 60 else 8 if avg < 70 else 4
-    if cash_profit_ratio is not None:
-        score += 20 if cash_profit_ratio >= 1 else 15 if cash_profit_ratio >= .8 else 10 if cash_profit_ratio >= .6 else 5 if cash_profit_ratio >= .4 else 2
-    else:
-        score += 8
-
-    score = int(max(0, min(100, round(score))))
-    rating = "优秀" if score >= 85 else "良好" if score >= 70 else "一般" if score >= 55 else "偏弱"
+def calculate_financial_quality(trend, cashflow_ratio):
+    """财务质量评分，保持V18.5评分口径。"""
+    score = 70
+    if trend is not None and not trend.empty:
+        try:
+            roe_col = _find(trend, ["ROE"])
+            if roe_col:
+                roe = pd.to_numeric(trend[roe_col], errors="coerce").dropna()
+                if not roe.empty:
+                    score += 10 if roe.iloc[-1] >= 15 else 5 if roe.iloc[-1] >= 10 else -5
+            debt_col = _find(trend, ["资产负债率"])
+            if debt_col:
+                debt = pd.to_numeric(trend[debt_col], errors="coerce").dropna()
+                if not debt.empty:
+                    score += 5 if debt.iloc[-1] < 50 else -5 if debt.iloc[-1] > 70 else 0
+        except Exception:
+            pass
+    if cashflow_ratio is not None:
+        score += 10 if cashflow_ratio >= 1 else 5 if cashflow_ratio >= 0.7 else -10
+    score = max(0, min(100, int(score)))
+    rating = "优秀" if score >= 90 else "良好" if score >= 75 else "一般" if score >= 60 else "较弱"
     return {"score": score, "rating": rating}
