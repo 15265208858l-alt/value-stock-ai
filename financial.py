@@ -1,6 +1,7 @@
-"""ValueStock AI - 财务分析 V18.1
-核心原则：优先使用东方财富“按报告期”结构化指标；旧新浪接口仅作兜底。
+"""ValueStock AI - 财务分析 V18.2
+核心原则：优先使用东方财富“按报告期”结构化指标；旧接口仅作兜底。
 重点修复：年度EPS/BPS错期、季度累计值误当年度值、保险/金融股指标异常。
+本版新增：process_financial_indicators 自动读取当前研究股票代码，确保刷新到正确报告期数据。
 """
 from __future__ import annotations
 import pandas as pd
@@ -43,11 +44,22 @@ def _extract_code(df):
     return None
 
 
-def _refresh_eastmoney(indicators):
+def _current_stock_code():
+    try:
+        import adaptive_valuation
+        code = str(getattr(adaptive_valuation, "LAST_STOCK_CODE", "") or "").strip()
+        if len(code) == 6 and code.isdigit():
+            return code
+    except Exception:
+        pass
+    return None
+
+
+def _refresh_eastmoney(indicators, stock_code=None):
     """刷新为东财按报告期数据。失败则返回原数据。"""
     if ak is None or indicators is None or indicators.empty:
         return indicators
-    code = _extract_code(indicators)
+    code = stock_code or _extract_code(indicators) or _current_stock_code()
     if not code:
         return indicators
 
@@ -83,12 +95,12 @@ def _value(row, df, candidates):
     return safe_float(row[col]) if col else None
 
 
-def process_financial_indicators(indicators):
+def process_financial_indicators(indicators, stock_code=None):
     result = {"latest": {}, "annual": {}, "trend": pd.DataFrame()}
     if indicators is None or indicators.empty:
         return result
 
-    source = _refresh_eastmoney(indicators)
+    source = _refresh_eastmoney(indicators, stock_code=stock_code)
     df = _prepare(source)
     if df.empty:
         return result
