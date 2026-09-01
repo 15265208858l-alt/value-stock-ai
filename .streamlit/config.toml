@@ -1,15 +1,15 @@
 [theme]
 base = "light"
 primaryColor = "#B8872D"
-backgroundColor = "#EEF2F6"
+backgroundColor = "#F4F6F8"
 secondaryBackgroundColor = "#FFFFFF"
 textColor = "#16243A"
 font = "sans serif"
-baseRadius = "0.8rem"
-buttonRadius = "0.7rem"
+baseRadius = "0.85rem"
+buttonRadius = "0.75rem"
 borderColor = "#D7DEE8"
 dataframeBorderColor = "#D7DEE8"
-dataframeHeaderBackgroundColor = "#E7EDF4"
+dataframeHeaderBackgroundColor = "#E9EEF4"
 showWidgetBorder = true
 showSidebarBorder = true
 
