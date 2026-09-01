@@ -29,7 +29,7 @@ def _find(df, names):
 
 def _looks_like_date_column(name):
     s = str(name).strip()
-    return bool(re.fullmatch(r"20\\d{2}[-/]?\\d{2}[-/]?\\d{2}", s))
+    return bool(re.fullmatch(r"20\d{2}[-/]?\d{2}[-/]?\d{2}", s))
 
 
 def _normalize_wide_indicators(df):
@@ -43,7 +43,6 @@ def _normalize_wide_indicators(df):
         label_col = next((c for c in ["选取指标", "指标", "项目", "名称"] if c in df.columns), df.columns[0])
         x = df[[label_col] + date_cols].copy()
         x[label_col] = x[label_col].astype(str).str.strip()
-        # 同一指标若重复出现，保留最后一个有效定义。
         x = x.drop_duplicates(subset=[label_col], keep="last").set_index(label_col)
         t = x[date_cols].T.reset_index().rename(columns={"index": "报告期"})
         t["报告期"] = t["报告期"].astype(str)
@@ -135,12 +134,10 @@ def _build_profit_trend(profit_report):
 def process_financial_indicators(indicators, stock_code=None, profit_report=None):
     result = {"latest": {}, "annual": {}, "trend": pd.DataFrame()}
     if indicators is None or getattr(indicators, "empty", True):
-        # 即使财务指标接口失败，也尝试用利润表构建历史EPS趋势。
         result["trend"] = _build_profit_trend(profit_report)
         return result
     try:
         df = _prepare(indicators)
-        profit_df = _prepare(profit_report)
         if df.empty:
             result["trend"] = _build_profit_trend(profit_report)
             return result
@@ -210,12 +207,12 @@ def process_financial_indicators(indicators, stock_code=None, profit_report=None
             eps_map = dict(zip(annual_eps_df["_年份"], annual_eps_df["_EPS"]))
             out["EPS"] = trend_base["_年份"].map(eps_map)
 
-        # 对指标接口缺失的历史字段，用利润表计算结果补齐，而不是让整张5年表出现None。
         fallback = _build_profit_trend(profit_report)
         if not fallback.empty:
+            years = pd.to_datetime(fallback["报告期"], errors="coerce").dt.year
             for col in ["EPS", "营收增长率", "净利润增长率"]:
                 if col in fallback.columns:
-                    fmap = dict(zip(pd.to_datetime(fallback["报告期"]).dt.year, fallback[col]))
+                    fmap = dict(zip(years, fallback[col]))
                     if col not in out.columns:
                         out[col] = trend_base["_年份"].map(fmap)
                     else:
