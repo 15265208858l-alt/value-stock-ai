@@ -1,4 +1,4 @@
-"""ValueStock AI - 财务分析 V20.0
+"""ValueStock AI - 财务分析 V20.1
 修复：兼容 AKShare 新浪/东财财务指标的横向、纵向两种返回结构，并从利润表兜底构建5年历史趋势。
 """
 from __future__ import annotations
@@ -29,7 +29,15 @@ def _find(df, names):
 
 def _looks_like_date_column(name):
     s = str(name).strip()
-    return bool(re.fullmatch(r"20\d{2}[-/]?\d{2}[-/]?\d{2}", s))
+    if re.fullmatch(r"20\d{2}[-/]?\d{2}[-/]?\d{2}", s):
+        return True
+    if re.fullmatch(r"20\d{2}[-/]?\d{2}[-/]?\d{2}.*", s):
+        return True
+    try:
+        dt = pd.to_datetime(s, errors="coerce")
+        return bool(pd.notna(dt) and 2000 <= dt.year <= 2100)
+    except Exception:
+        return False
 
 
 def _normalize_wide_indicators(df):
