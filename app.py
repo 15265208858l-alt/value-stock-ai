@@ -18,7 +18,7 @@ st.set_page_config(page_title="A股价值研投 | ValueStock AI", page_icon="�
 
 st.markdown("""
 <style>
-:root{--vs-ink:#172033;--vs-muted:#6b778c;--vs-gold:#b8872d;--vs-gold2:#d4a94d;--vs-blue:#2563a8;--vs-bg:#f6f8fb;--vs-line:#e6eaf0}
+:root{--vs-ink:#172033;--vs-muted:#6b778c;--vs-gold:#b8872d;--vs-gold2:#d4a94d;--vs-blue:#2563a8;--vs-line:#e6eaf0}
 .block-container{max-width:1180px;padding-top:1.2rem;padding-bottom:3rem}
 .vs-brand{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 16px;padding:14px 16px;border:1px solid var(--vs-line);border-radius:18px;background:linear-gradient(135deg,#fffdf8,#f8fafc);box-shadow:0 5px 20px rgba(20,35,59,.05)}
 .vs-brand-main{font-size:1.15rem;font-weight:900;color:var(--vs-ink);letter-spacing:.02em}.vs-brand-sub{font-size:.74rem;color:var(--vs-muted);margin-top:3px}.vs-brand-pill{white-space:nowrap;border-radius:999px;padding:6px 11px;background:#f5ead4;color:#7c5b20;font-size:.72rem;font-weight:800}
@@ -61,10 +61,8 @@ code=clean_stock_code(code_input)
 if not code:
     st.error("❌ 请输入6位数字股票代码"); st.stop()
 
-# 预留顶部结论位：所有计算完成后回填，手机用户无需滚到底部才能看到核心结论。
 result_slot=st.empty()
 
-# 性能核心：五类数据并行获取；去掉旧版多次长重试和全市场扫描。
 with st.spinner("⚡ 正在快速获取A股核心数据……"):
     data=load_stock_data_fast(code)
 if not data:
@@ -254,9 +252,11 @@ st.markdown('<div class="vs-explain"><b>🎯 核心研究结论</b></div>',unsaf
 a,b,c,d=st.columns(4); a.metric("综合评分",f"{score['score']}/100"); b.metric("中性合理价","暂无" if vr.get("normal") is None else f"{vr['normal']:.2f} 元"); c.metric("当前价格","暂无" if price is None else f"{price:.2f} 元"); d.metric("安全边际","暂无" if gap is None else f"{gap:+.1f}%")
 st.markdown(f'<div class="vs-company">{name} <span class="vs-badge">{score["rating"]}</span></div><div class="vs-explain">最终建议：<b>{decision["decision"]}</b>｜操作：{decision["action"]}｜仓位：{decision["position"]}<br>估值：{score["valuation_level"]}｜历史估值：{score["historical_level"]}｜风险：{score["risk_level"]}</div>',unsafe_allow_html=True)
 
-# 回填顶部核心结论卡：使用占位容器可在计算完成后把结论放到页面最上方。
+normal_text="暂无" if vr.get("normal") is None else f"{vr['normal']:.2f} 元"
+price_text="暂无" if price is None else f"{price:.2f} 元"
+gap_text="暂无" if gap is None else f"{gap:+.1f}%"
 result_class="vs-result-good" if score["score"]>=75 else "vs-result-mid" if score["score"]>=60 else "vs-result-bad"
-result_slot.markdown(f'<div class="vs-result {result_class}"><div class="vs-result-title">🎯 {name} · 核心研究结论</div><div class="vs-result-main">{decision["decision"]} · {decision["action"]}</div><div class="vs-result-sub">综合评分 {score["score"]}/100　｜　当前价格 {"暂无" if price is None else f"{price:.2f} 元"}　｜　中性合理价 {"暂无" if vr.get("normal") is None else f"{vr["normal"]:.2f} 元"}　｜　安全边际 {"暂无" if gap is None else f"{gap:+.1f}%"}</div><div class="vs-result-sub">估值：{score["valuation_level"]}　｜　历史估值：{score["historical_level"]}　｜　风险：{score["risk_level"]}　｜　建议仓位：{decision["position"]}</div></div>',unsafe_allow_html=True)
+result_slot.markdown(f'<div class="vs-result {result_class}"><div class="vs-result-title">🎯 {name} · 核心研究结论</div><div class="vs-result-main">{decision["decision"]} · {decision["action"]}</div><div class="vs-result-sub">综合评分 {score["score"]}/100　｜　当前价格 {price_text}　｜　中性合理价 {normal_text}　｜　安全边际 {gap_text}</div><div class="vs-result-sub">估值：{score["valuation_level"]}　｜　历史估值：{score["historical_level"]}　｜　风险：{score["risk_level"]}　｜　建议仓位：{decision["position"]}</div></div>',unsafe_allow_html=True)
 
 st.header("🏆 十二、最终投资结论")
 if score["score"]>=85: conclusion="🟢 公司质量与估值较匹配，值得重点研究。"
