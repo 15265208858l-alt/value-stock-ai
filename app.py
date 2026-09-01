@@ -18,28 +18,42 @@ st.set_page_config(page_title="A股价值研投 | ValueStock AI", page_icon="�
 
 st.markdown("""
 <style>
-.vs-search-title{font-size:1.35rem;font-weight:850;color:#14233b}
-.vs-search-sub{font-size:.88rem;color:#66758a;margin-bottom:12px}
-.vs-explain{background:#f7f9fb;border-radius:14px;padding:12px 14px;color:#506176;font-size:.86rem;margin-top:10px}
-.vs-company{font-size:1.35rem;font-weight:900;color:#14233b}.vs-badge{border-radius:999px;padding:5px 10px;background:#f4ead7;color:#7d5a16;font-weight:800}
+:root{--vs-ink:#172033;--vs-muted:#6b778c;--vs-gold:#b8872d;--vs-gold2:#d4a94d;--vs-blue:#2563a8;--vs-bg:#f6f8fb;--vs-line:#e6eaf0}
+.block-container{max-width:1180px;padding-top:1.2rem;padding-bottom:3rem}
+.vs-brand{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 16px;padding:14px 16px;border:1px solid var(--vs-line);border-radius:18px;background:linear-gradient(135deg,#fffdf8,#f8fafc);box-shadow:0 5px 20px rgba(20,35,59,.05)}
+.vs-brand-main{font-size:1.15rem;font-weight:900;color:var(--vs-ink);letter-spacing:.02em}.vs-brand-sub{font-size:.74rem;color:var(--vs-muted);margin-top:3px}.vs-brand-pill{white-space:nowrap;border-radius:999px;padding:6px 11px;background:#f5ead4;color:#7c5b20;font-size:.72rem;font-weight:800}
+.vs-search-title{font-size:1.55rem;font-weight:900;color:var(--vs-ink);letter-spacing:.01em}.vs-search-sub{font-size:.92rem;color:var(--vs-muted);margin:4px 0 4px}.vs-search-tip{font-size:.78rem;color:#7b8798;margin-bottom:12px}
+.vs-hero{padding:18px 18px 16px;border-radius:18px;background:linear-gradient(135deg,#eef5ff 0%,#fbfcfe 65%);border:1px solid #dce8f7;margin:10px 0 14px}.vs-hero-title{font-size:1.08rem;font-weight:900;color:#173b67}.vs-hero-text{font-size:.82rem;color:#53657a;line-height:1.65;margin-top:6px}
+.vs-feature-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:12px 0}.vs-feature{padding:12px;border:1px solid var(--vs-line);border-radius:14px;background:#fff}.vs-feature b{display:block;color:var(--vs-ink);font-size:.84rem;margin-bottom:4px}.vs-feature span{font-size:.72rem;color:var(--vs-muted);line-height:1.45}
+.vs-plan{border:1px solid #e6dfd0;border-radius:16px;padding:13px 14px;background:linear-gradient(135deg,#fffaf0,#fff);margin-top:12px}.vs-plan-title{font-weight:900;color:#7a5b22;font-size:.88rem}.vs-plan-text{font-size:.75rem;color:#69778a;line-height:1.5;margin-top:4px}
+.vs-explain{background:#f7f9fb;border-radius:14px;padding:12px 14px;color:#506176;font-size:.86rem;margin-top:10px}.vs-company{font-size:1.35rem;font-weight:900;color:#14233b}.vs-badge{border-radius:999px;padding:5px 10px;background:#f4ead7;color:#7d5a16;font-weight:800}
+[data-testid="stMetric"]{border:1px solid #edf0f4;border-radius:14px;background:#fff;padding:10px 11px;box-shadow:0 2px 10px rgba(20,35,59,.025)}
+[data-testid="stMetricLabel"]{color:#68768a}
+button[kind="primary"]{background:linear-gradient(135deg,var(--vs-gold2),var(--vs-gold))!important;border:0!important;color:#fff!important;font-weight:900!important;box-shadow:0 6px 16px rgba(184,135,45,.22)!important}
+.stTextInput input{border-radius:12px!important;border:1px solid #dfe5ec!important}
 @media(max-width:768px){
- .block-container{padding:.5rem .7rem 2rem!important}
- h1{font-size:1.5rem!important} h2{font-size:1.1rem!important}
+ .block-container{padding:.45rem .65rem 2rem!important}
+ .vs-brand{padding:11px 12px;border-radius:14px;margin-bottom:12px}.vs-brand-main{font-size:1rem}.vs-brand-pill{font-size:.66rem;padding:5px 8px}
+ .vs-search-title{font-size:1.32rem}.vs-search-sub{font-size:.84rem}.vs-search-tip{font-size:.72rem}
+ .vs-hero{padding:14px;border-radius:15px}.vs-hero-title{font-size:.98rem}.vs-hero-text{font-size:.76rem}
+ .vs-feature-grid{grid-template-columns:repeat(2,1fr);gap:8px}.vs-feature{padding:10px}.vs-feature b{font-size:.77rem}.vs-feature span{font-size:.67rem}
+ h1{font-size:1.42rem!important} h2{font-size:1.08rem!important} h3{font-size:.98rem!important}
  [data-testid="stMetric"]{padding:8px 9px!important;border-radius:12px!important}
- [data-testid="stMetricLabel"]{font-size:.7rem!important}
- [data-testid="stMetricValue"]{font-size:1.1rem!important}
- button[kind="primary"]{min-height:44px!important}
+ [data-testid="stMetricLabel"]{font-size:.68rem!important}
+ [data-testid="stMetricValue"]{font-size:1.08rem!important}
+ button[kind="primary"]{min-height:46px!important}
  .stTextInput input{font-size:16px!important}
 }
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="vs-search-title">🔎 研究一家A股公司</div><div class="vs-search-sub">输入股票代码，快速查看企业质量、估值、安全边际与投资决策。</div><div style="font-size:.78rem;color:#66758a">📱 手机端优化：结论优先，数据模块快速加载。</div>', unsafe_allow_html=True)
+st.markdown('<div class="vs-brand"><div><div class="vs-brand-main">📈 A股价值研投</div><div class="vs-brand-sub">ValueStock AI · 长期价值投资研究平台</div></div><div class="vs-brand-pill">长期价值 · 安全边际</div></div>', unsafe_allow_html=True)
+st.markdown('<div class="vs-search-title">🔎 研究一家A股公司</div><div class="vs-search-sub">输入股票代码，快速查看企业质量、估值、安全边际与投资决策。</div><div class="vs-search-tip">📱 手机端优化：结论优先、关键指标卡片化、详细数据向下展开。</div>', unsafe_allow_html=True)
 code_input=st.text_input("A股股票代码",placeholder="例如：000333",label_visibility="collapsed")
 peer_input=st.text_input("同行股票代码",placeholder="同行可选填，例如：000651,600690",label_visibility="collapsed")
 run=st.button("🔍 开始价值研究",type="primary",use_container_width=True)
 if not run:
-    st.markdown('<div class="vs-explain">📊 基本面分析　💰 AI估值　🛡️ 风险排查　🏭 同行业比较<br><br>系统将从企业质量、现金流、正常化EPS、PE/PB、历史估值、同行估值和安全边际等维度进行研究。</div>',unsafe_allow_html=True)
+    st.markdown('<div class="vs-hero"><div class="vs-hero-title">🧠 一套面向长期价值投资的A股研究框架</div><div class="vs-hero-text">不追热点，不靠单一指标。系统围绕企业质量、现金流、正常化EPS、行业自适应估值、历史估值、同行比较与安全边际，形成可复核的研究结论。</div></div><div class="vs-feature-grid"><div class="vs-feature"><b>📊 企业质量</b><span>ROE、成长、负债与5年财务质量</span></div><div class="vs-feature"><b>💰 AI估值</b><span>PE/PB、正常化EPS与情景估值</span></div><div class="vs-feature"><b>🛡️ 风险排查</b><span>现金流、应收、存货等核心风险</span></div><div class="vs-feature"><b>🎯 投资决策</b><span>评分、安全边际与建议仓位</span></div></div><div class="vs-plan"><div class="vs-plan-title">⭐ 专业会员功能正在规划</div><div class="vs-plan-text">后续将提供更深度的历史数据、重点股票跟踪、估值提醒、研究报告与个人股票池。当前版本先把核心研究引擎和移动端体验做到稳定可靠。</div></div>',unsafe_allow_html=True)
     st.stop()
 code=clean_stock_code(code_input)
 if not code:
