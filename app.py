@@ -26,6 +26,7 @@ st.markdown("""
 .vs-hero{padding:18px 18px 16px;border-radius:18px;background:linear-gradient(135deg,#eef5ff 0%,#fbfcfe 65%);border:1px solid #dce8f7;margin:10px 0 14px}.vs-hero-title{font-size:1.08rem;font-weight:900;color:#173b67}.vs-hero-text{font-size:.82rem;color:#53657a;line-height:1.65;margin-top:6px}
 .vs-feature-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:12px 0}.vs-feature{padding:12px;border:1px solid var(--vs-line);border-radius:14px;background:#fff}.vs-feature b{display:block;color:var(--vs-ink);font-size:.84rem;margin-bottom:4px}.vs-feature span{font-size:.72rem;color:var(--vs-muted);line-height:1.45}
 .vs-plan{border:1px solid #e6dfd0;border-radius:16px;padding:13px 14px;background:linear-gradient(135deg,#fffaf0,#fff);margin-top:12px}.vs-plan-title{font-weight:900;color:#7a5b22;font-size:.88rem}.vs-plan-text{font-size:.75rem;color:#69778a;line-height:1.5;margin-top:4px}
+.vs-result{border:1px solid #e5e9ef;border-radius:18px;padding:15px 16px;background:#fff;box-shadow:0 7px 24px rgba(20,35,59,.06);margin:12px 0 18px}.vs-result-title{font-size:1rem;font-weight:900;color:var(--vs-ink);margin-bottom:9px}.vs-result-main{font-size:1.12rem;font-weight:900;color:#173b67}.vs-result-sub{font-size:.76rem;color:#66758a;margin-top:5px}.vs-result-good{border-left:5px solid #4b9b68}.vs-result-mid{border-left:5px solid var(--vs-gold)}.vs-result-bad{border-left:5px solid #c45a5a}
 .vs-explain{background:#f7f9fb;border-radius:14px;padding:12px 14px;color:#506176;font-size:.86rem;margin-top:10px}.vs-company{font-size:1.35rem;font-weight:900;color:#14233b}.vs-badge{border-radius:999px;padding:5px 10px;background:#f4ead7;color:#7d5a16;font-weight:800}
 [data-testid="stMetric"]{border:1px solid #edf0f4;border-radius:14px;background:#fff;padding:10px 11px;box-shadow:0 2px 10px rgba(20,35,59,.025)}
 [data-testid="stMetricLabel"]{color:#68768a}
@@ -37,6 +38,7 @@ button[kind="primary"]{background:linear-gradient(135deg,var(--vs-gold2),var(--v
  .vs-search-title{font-size:1.32rem}.vs-search-sub{font-size:.84rem}.vs-search-tip{font-size:.72rem}
  .vs-hero{padding:14px;border-radius:15px}.vs-hero-title{font-size:.98rem}.vs-hero-text{font-size:.76rem}
  .vs-feature-grid{grid-template-columns:repeat(2,1fr);gap:8px}.vs-feature{padding:10px}.vs-feature b{font-size:.77rem}.vs-feature span{font-size:.67rem}
+ .vs-result{padding:12px 13px;border-radius:15px}.vs-result-main{font-size:1rem}.vs-result-sub{font-size:.7rem}
  h1{font-size:1.42rem!important} h2{font-size:1.08rem!important} h3{font-size:.98rem!important}
  [data-testid="stMetric"]{padding:8px 9px!important;border-radius:12px!important}
  [data-testid="stMetricLabel"]{font-size:.68rem!important}
@@ -58,6 +60,9 @@ if not run:
 code=clean_stock_code(code_input)
 if not code:
     st.error("❌ 请输入6位数字股票代码"); st.stop()
+
+# 预留顶部结论位：所有计算完成后回填，手机用户无需滚到底部才能看到核心结论。
+result_slot=st.empty()
 
 # 性能核心：五类数据并行获取；去掉旧版多次长重试和全市场扫描。
 with st.spinner("⚡ 正在快速获取A股核心数据……"):
@@ -248,6 +253,10 @@ a,b,c=st.columns(3); a.metric("投资决策",decision["decision"]); b.metric("�
 st.markdown('<div class="vs-explain"><b>🎯 核心研究结论</b></div>',unsafe_allow_html=True)
 a,b,c,d=st.columns(4); a.metric("综合评分",f"{score['score']}/100"); b.metric("中性合理价","暂无" if vr.get("normal") is None else f"{vr['normal']:.2f} 元"); c.metric("当前价格","暂无" if price is None else f"{price:.2f} 元"); d.metric("安全边际","暂无" if gap is None else f"{gap:+.1f}%")
 st.markdown(f'<div class="vs-company">{name} <span class="vs-badge">{score["rating"]}</span></div><div class="vs-explain">最终建议：<b>{decision["decision"]}</b>｜操作：{decision["action"]}｜仓位：{decision["position"]}<br>估值：{score["valuation_level"]}｜历史估值：{score["historical_level"]}｜风险：{score["risk_level"]}</div>',unsafe_allow_html=True)
+
+# 回填顶部核心结论卡：使用占位容器可在计算完成后把结论放到页面最上方。
+result_class="vs-result-good" if score["score"]>=75 else "vs-result-mid" if score["score"]>=60 else "vs-result-bad"
+result_slot.markdown(f'<div class="vs-result {result_class}"><div class="vs-result-title">🎯 {name} · 核心研究结论</div><div class="vs-result-main">{decision["decision"]} · {decision["action"]}</div><div class="vs-result-sub">综合评分 {score["score"]}/100　｜　当前价格 {"暂无" if price is None else f"{price:.2f} 元"}　｜　中性合理价 {"暂无" if vr.get("normal") is None else f"{vr["normal"]:.2f} 元"}　｜　安全边际 {"暂无" if gap is None else f"{gap:+.1f}%"}</div><div class="vs-result-sub">估值：{score["valuation_level"]}　｜　历史估值：{score["historical_level"]}　｜　风险：{score["risk_level"]}　｜　建议仓位：{decision["position"]}</div></div>',unsafe_allow_html=True)
 
 st.header("🏆 十二、最终投资结论")
 if score["score"]>=85: conclusion="🟢 公司质量与估值较匹配，值得重点研究。"
