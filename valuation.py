@@ -1,6 +1,6 @@
 """
 ValueStock AI
-估值计算模块 V18.0
+估值计算模块 V18.1
 
 原则：
 1. 主程序直接传入估值用EPS，不重复应用盈利兑现系数。
@@ -8,7 +8,28 @@ ValueStock AI
 3. 新增“历史盈利情景估值”：只使用已实现EPS序列计算CAGR。
 4. 当历史EPS CAGR异常偏高时，不直接把历史高增长外推成目标价，
    改用固定的压力测试带宽，防止低基数/业绩跳升把估值无限抬高。
+5. 当EPS与BPS均不可用时，估值模块必须安全降级，不能因为格式化None导致整页崩溃。
 """
+
+
+class UnavailableValuation(float):
+    """估值数据缺失时的安全占位值。
+
+    以0作为内部比较值，使上层 `<= 0` 判断可以安全短路；
+    展示时统一显示“暂无”，避免 Streamlit 因 `None:.2f` 崩溃。
+    """
+
+    def __new__(cls):
+        return float.__new__(cls, 0.0)
+
+    def __format__(self, spec):
+        return "暂无"
+
+    def __repr__(self):
+        return "UnavailableValuation()"
+
+
+UNAVAILABLE_VALUATION = UnavailableValuation()
 
 
 def calculate_pe_value(eps, target_pe):
@@ -75,6 +96,16 @@ def calculate_valuation_scenarios(
         calculate_combined_value(pe_values[1], pb_values[1], pe_weight, pb_weight),
         calculate_combined_value(pe_values[2], pb_values[2], pe_weight, pb_weight),
     ]
+
+    # EPS、BPS均缺失时，上层页面仍应完整展示，不能因为 None:.2f 崩溃。
+    # 仅把“综合价值”使用安全占位；原始PE/PB路径仍保留None，便于诊断数据缺失。
+    if values[1] is None:
+        values = [
+            UNAVAILABLE_VALUATION,
+            UNAVAILABLE_VALUATION,
+            UNAVAILABLE_VALUATION,
+        ]
+
     zone = calculate_price_zone(values[1])
     return {
         "conservative": values[0],
