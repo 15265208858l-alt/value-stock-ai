@@ -1,7 +1,8 @@
-"""ValueStock AI - 财务分析 V19.1
-修复：利润表只有季度EPS时，回退财务指标年度EPS，确保历史PE和5年趋势可用。
+"""ValueStock AI - 财务分析 V20.0
+修复：兼容 AKShare 新浪/东财财务指标的横向、纵向两种返回结构，并从利润表兜底构建5年历史趋势。
 """
 from __future__ import annotations
+import re
 import pandas as pd
 
 
@@ -10,7 +11,7 @@ def safe_float(value):
         if value is None:
             return None
         text = str(value).strip().replace(",", "").replace("%", "")
-        if text in {"", "--", "None", "none", "NaN", "nan"}:
+        if text in {"", "--", "None", "none", "NaN", "nan", "null", "NULL"}:
             return None
         return float(text)
     except Exception:
@@ -26,15 +27,40 @@ def _find(df, names):
     return None
 
 
+def _looks_like_date_column(name):
+    s = str(name).strip()
+    return bool(re.fullmatch(r"20\\d{2}[-/]?\\d{2}[-/]?\\d{2}", s))
+
+
+def _normalize_wide_indicators(df):
+    """兼容新浪老接口常见结构：第一列为指标名称，后续列为各年度日期。"""
+    if df is None or getattr(df, "empty", True):
+        return pd.DataFrame()
+    try:
+        date_cols = [c for c in df.columns if _looks_like_date_column(c)]
+        if len(date_cols) < 2:
+            return df
+        label_col = next((c for c in ["选取指标", "指标", "项目", "名称"] if c in df.columns), df.columns[0])
+        x = df[[label_col] + date_cols].copy()
+        x[label_col] = x[label_col].astype(str).str.strip()
+        # 同一指标若重复出现，保留最后一个有效定义。
+        x = x.drop_duplicates(subset=[label_col], keep="last").set_index(label_col)
+        t = x[date_cols].T.reset_index().rename(columns={"index": "报告期"})
+        t["报告期"] = t["报告期"].astype(str)
+        return t
+    except Exception:
+        return df
+
+
 def _prepare(df):
     if df is None or getattr(df, "empty", True):
         return pd.DataFrame()
     try:
-        x = df.copy()
-        date_col = _find(x, ["REPORT_DATE", "日期", "报告期", "报告日期", "截止日期"])
+        x = _normalize_wide_indicators(df.copy())
+        date_col = _find(x, ["REPORT_DATE", "日期", "报告期", "报告日期", "截止日期", "报告日", "报表日期"])
         if date_col is None:
             return pd.DataFrame()
-        x["_分析日期"] = pd.to_datetime(x[date_col], errors="coerce")
+        x["_分析日期"] = pd.to_datetime(x[date_col].astype(str), errors="coerce")
         return x.dropna(subset=["_分析日期"]).sort_values("_分析日期").reset_index(drop=True)
     except Exception:
         return pd.DataFrame()
@@ -52,19 +78,20 @@ def _eps_series(df):
     if df is None or getattr(df, "empty", True):
         return pd.DataFrame(columns=["_分析日期", "_EPS"])
     try:
-        date_col = _find(df, ["REPORT_DATE", "日期", "报告期", "报告日期", "截止日期"])
-        eps_col = _find(df, [
-            "基本每股收益", "基本每股收益(元)", "基本每股收益（元）", "EPSJB",
-            "每股收益", "每股收益(元)", "每股收益（元）",
-            "基本每股收益（元/股）", "基本每股收益(元/股)",
-            "摊薄每股收益(元)", "摊薄每股收益", "EPSXS"
-        ])
-        if date_col is None or eps_col is None:
+        x = _prepare(df)
+        if x.empty:
             return pd.DataFrame(columns=["_分析日期", "_EPS"])
-        x = df[[date_col, eps_col]].copy()
-        x["_分析日期"] = pd.to_datetime(x[date_col], errors="coerce")
-        x["_EPS"] = x[eps_col].apply(safe_float)
-        return x.dropna(subset=["_分析日期", "_EPS"]).sort_values("_分析日期").drop_duplicates("_分析日期", keep="last").reset_index(drop=True)[["_分析日期", "_EPS"]]
+        eps_col = _find(x, [
+            "EPS", "基本每股收益", "基本每股收益(元)", "基本每股收益（元）",
+            "每股收益", "每股收益(元)", "每股收益（元）", "EPSJB",
+            "基本每股收益（元/股）", "基本每股收益(元/股)",
+            "摊薄每股收益(元)", "摊薄每股收益", "摊薄每股收益(元/股)", "EPSXS"
+        ])
+        if eps_col is None:
+            return pd.DataFrame(columns=["_分析日期", "_EPS"])
+        out = x[["_分析日期", eps_col]].copy()
+        out["_EPS"] = out[eps_col].apply(safe_float)
+        return out.dropna(subset=["_分析日期", "_EPS"]).sort_values("_分析日期").drop_duplicates("_分析日期", keep="last")[["_分析日期", "_EPS"]].reset_index(drop=True)
     except Exception:
         return pd.DataFrame(columns=["_分析日期", "_EPS"])
 
@@ -75,23 +102,58 @@ def _annual_eps(df):
     return df[df["_分析日期"].dt.month == 12].copy()
 
 
+def _build_profit_trend(profit_report):
+    """从新浪利润表直接构建年度EPS/营收/净利润增长趋势，作为财务指标趋势的强兜底。"""
+    if profit_report is None or getattr(profit_report, "empty", True):
+        return pd.DataFrame()
+    try:
+        x = _prepare(profit_report)
+        if x.empty:
+            return pd.DataFrame()
+        eps_col = _find(x, ["基本每股收益", "基本每股收益(元)", "基本每股收益（元）", "每股收益", "每股收益(元)", "摊薄每股收益"])
+        revenue_col = _find(x, ["营业总收入", "营业收入", "一、营业总收入", "主营业务收入"])
+        profit_col = _find(x, ["归属于母公司所有者的净利润", "归属于母公司股东的净利润", "净利润", "五、净利润"])
+        annual = x[x["_分析日期"].dt.month == 12].copy()
+        if annual.empty:
+            annual = x.copy()
+        annual["_年份"] = annual["_分析日期"].dt.year
+        annual = annual.sort_values("_分析日期").groupby("_年份", as_index=False).tail(1).sort_values("_分析日期").tail(5).copy()
+        out = pd.DataFrame({"报告期": annual["_分析日期"].dt.strftime("%Y-%m-%d").values})
+        if eps_col:
+            out["EPS"] = annual[eps_col].apply(safe_float).values
+        if revenue_col:
+            rev = annual[revenue_col].apply(safe_float)
+            out["营收增长率"] = rev.pct_change() * 100
+        if profit_col:
+            npv = annual[profit_col].apply(safe_float)
+            out["净利润增长率"] = npv.pct_change() * 100
+        return out.reset_index(drop=True)
+    except Exception:
+        return pd.DataFrame()
+
+
 def process_financial_indicators(indicators, stock_code=None, profit_report=None):
     result = {"latest": {}, "annual": {}, "trend": pd.DataFrame()}
     if indicators is None or getattr(indicators, "empty", True):
+        # 即使财务指标接口失败，也尝试用利润表构建历史EPS趋势。
+        result["trend"] = _build_profit_trend(profit_report)
         return result
     try:
         df = _prepare(indicators)
+        profit_df = _prepare(profit_report)
         if df.empty:
+            result["trend"] = _build_profit_trend(profit_report)
             return result
+
         latest = df.iloc[-1]
         annual_df = df[df["_分析日期"].dt.month == 12].copy()
         annual = annual_df.iloc[-1] if not annual_df.empty else latest
 
-        roe_cols = ["ROEJQ", "加权净资产收益率(%)", "加权净资产收益率", "摊薄净资产收益率(%)", "净资产收益率(%)", "净资产收益率", "ROE"]
-        rev_cols = ["TOTALOPERATEREVETZ", "主营业务收入增长率(%)", "主营业务收入增长率", "营业收入增长率(%)", "营业收入增长率", "营收增长率"]
-        profit_cols = ["PARENTNETPROFITTZ", "净利润增长率(%)", "净利润增长率", "归属净利润同比增长(%)", "净利润同比增长率"]
+        roe_cols = ["ROEJQ", "加权净资产收益率(%)", "加权净资产收益率", "摊薄净资产收益率(%)", "净资产收益率(%)", "净资产收益率", "ROE", "股东权益回报率(%)"]
+        rev_cols = ["TOTALOPERATEREVETZ", "主营业务收入增长率(%)", "主营业务收入增长率", "营业收入增长率(%)", "营业收入增长率", "营收增长率", "营业总收入同比"]
+        profit_cols = ["PARENTNETPROFITTZ", "净利润增长率(%)", "净利润增长率", "归属净利润同比增长(%)", "净利润同比增长率", "净利润同比"]
         debt_cols = ["ZCFZL", "资产负债率(%)", "资产负债率", "负债率"]
-        bps_cols = ["BPS", "每股净资产(元)", "每股净资产", "每股净资产_调整后(元)", "每股净资产_调整后", "每股净资产_调整前(元)"]
+        bps_cols = ["BPS", "每股净资产(元)", "每股净资产", "每股净资产_调整后(元)", "每股净资产_调整后", "每股净资产_调整前(元)", "每股净资产_调整前"]
         eps_cols = ["EPSJB", "基本每股收益(元)", "基本每股收益", "基本每股收益（元）", "基本每股收益(元/股)", "摊薄每股收益(元)", "摊薄每股收益", "每股收益(元)", "每股收益", "EPSXS"]
 
         profit_eps = _eps_series(profit_report)
@@ -99,8 +161,6 @@ def process_financial_indicators(indicators, stock_code=None, profit_report=None
         profit_annual = _annual_eps(profit_eps)
         indicator_annual = _annual_eps(indicator_eps)
 
-        # 关键修复：利润表只要没有年度EPS，就不能继续使用它覆盖历史EPS；
-        # 必须切换到财务指标中的年度EPS，否则历史PE会显示“数据不足”。
         if not profit_annual.empty:
             eps_df = profit_eps
             annual_eps_df = profit_annual
@@ -150,10 +210,22 @@ def process_financial_indicators(indicators, stock_code=None, profit_report=None
             eps_map = dict(zip(annual_eps_df["_年份"], annual_eps_df["_EPS"]))
             out["EPS"] = trend_base["_年份"].map(eps_map)
 
+        # 对指标接口缺失的历史字段，用利润表计算结果补齐，而不是让整张5年表出现None。
+        fallback = _build_profit_trend(profit_report)
+        if not fallback.empty:
+            for col in ["EPS", "营收增长率", "净利润增长率"]:
+                if col in fallback.columns:
+                    fmap = dict(zip(pd.to_datetime(fallback["报告期"]).dt.year, fallback[col]))
+                    if col not in out.columns:
+                        out[col] = trend_base["_年份"].map(fmap)
+                    else:
+                        out[col] = out[col].where(pd.notna(out[col]), trend_base["_年份"].map(fmap))
+
         result["trend"] = out.reset_index(drop=True)
         return result
     except Exception:
-        return {"latest": result.get("latest", {}), "annual": result.get("annual", {}), "trend": pd.DataFrame()}
+        fallback = _build_profit_trend(profit_report)
+        return {"latest": result.get("latest", {}), "annual": result.get("annual", {}), "trend": fallback}
 
 
 def calculate_financial_quality(trend, cashflow_ratio):
