@@ -1,19 +1,10 @@
-"""ValueStock AI - 盈利基础 V18.4
+"""ValueStock AI - 盈利基础 V19.0
 
-核心修复：
-1. EPS主数据源优先采用东方财富「利润表-按报告期」的基本每股收益。
-2. 财务指标接口仅作兜底，避免不同接口口径不一致时静默混用。
-3. TTM严格采用：最近完整年度EPS + 最新非年度报告期EPS - 上年同期EPS。
-4. 年度EPS只认12月31日报告期，避免把半年度/季度累计EPS误当年度EPS。
-5. Forward EPS仅作为观察指标，不进入核心估值分母。
+性能原则：build_earnings_basis 只使用页面已经获取的 indicators / profit_report。
+绝不在估值阶段再次访问 AkShare，避免第七模块出现长时间等待。
 """
 from __future__ import annotations
 import pandas as pd
-
-try:
-    import akshare as ak
-except Exception:
-    ak = None
 
 
 def _safe_float(v):
@@ -29,7 +20,7 @@ def _safe_float(v):
 
 
 def _find(df, names):
-    if df is None or df.empty:
+    if df is None or getattr(df, "empty", True):
         return None
     for n in names:
         if n in df.columns:
@@ -37,105 +28,21 @@ def _find(df, names):
     return None
 
 
-def _code(df):
-    if df is None or df.empty:
-        return None
-    c = _find(df, ["SECURITY_CODE", "股票代码", "代码", "SECUCODE"])
-    if c is None:
-        return None
-    for v in df[c].dropna().astype(str):
-        digits = "".join(ch for ch in v if ch.isdigit())
-        if len(digits) >= 6:
-            return digits[-6:]
-    return None
-
-
-def _current_stock_code():
-    try:
-        import adaptive_valuation
-        code = str(getattr(adaptive_valuation, "LAST_STOCK_CODE", "") or "").strip()
-        if len(code) == 6 and code.isdigit():
-            return code
-    except Exception:
-        pass
-    return None
-
-
-def _symbols(stock_code):
-    code = str(stock_code or "").strip()
-    if len(code) != 6 or not code.isdigit():
-        return []
-    if code.startswith(("6", "68")):
-        return [f"SH{code}", f"{code}.SH", code]
-    if code.startswith(("0", "3")):
-        return [f"SZ{code}", f"{code}.SZ", code]
-    return [f"BJ{code}", f"{code}.BJ", code]
-
-
-def _refresh_profit_report(stock_code=None):
-    """利润表-按报告期：EPS主数据源。"""
-    if ak is None:
-        return None
-    code = stock_code or _current_stock_code()
-    if not code:
-        return None
-    fn = getattr(ak, "stock_profit_sheet_by_report_em", None)
-    if fn is None:
-        return None
-    for symbol in _symbols(code):
-        try:
-            x = fn(symbol=symbol)
-            if x is None or x.empty:
-                continue
-            date_col = _find(x, ["REPORT_DATE", "报告日期", "报告期", "截止日期", "日期"])
-            eps_col = _find(x, [
-                "基本每股收益", "基本每股收益(元)", "基本每股收益（元）",
-                "每股收益", "每股收益(元)", "每股收益（元）", "EPSJB"
-            ])
-            if date_col and eps_col:
-                return x.copy()
-        except Exception:
-            continue
-    return None
-
-
-def _refresh_indicator(indicators, stock_code=None):
-    """财务指标按报告期：EPS备用数据源。"""
-    if ak is None:
-        return indicators
-    code = stock_code or _code(indicators) or _current_stock_code()
-    if not code:
-        return indicators
-    fn = getattr(ak, "stock_financial_analysis_indicator_em", None)
-    if fn is None:
-        return indicators
-    for symbol in _symbols(code):
-        try:
-            x = fn(symbol=symbol, indicator="按报告期")
-            if x is None or x.empty:
-                continue
-            date_col = _find(x, ["REPORT_DATE", "日期", "报告期", "报告日期", "截止日期"])
-            eps_col = _find(x, ["EPSJB", "基本每股收益(元)", "基本每股收益", "摊薄每股收益(元)", "摊薄每股收益", "每股收益(元)", "每股收益"])
-            if date_col and eps_col:
-                return x.copy()
-        except Exception:
-            continue
-    return indicators
-
-
 def _series_from_df(df, date_names, eps_names):
-    if df is None or df.empty:
+    if df is None or getattr(df, "empty", True):
         return pd.DataFrame(columns=["_date", "_eps"])
-    date_col = _find(df, date_names)
-    eps_col = _find(df, eps_names)
-    if date_col is None or eps_col is None:
+    try:
+        date_col = _find(df, date_names)
+        eps_col = _find(df, eps_names)
+        if date_col is None or eps_col is None:
+            return pd.DataFrame(columns=["_date", "_eps"])
+        x = df[[date_col, eps_col]].copy()
+        x["_date"] = pd.to_datetime(x[date_col], errors="coerce")
+        x["_eps"] = x[eps_col].apply(_safe_float)
+        x = x.dropna(subset=["_date", "_eps"])
+        return x.sort_values("_date").drop_duplicates("_date", keep="last").reset_index(drop=True)[["_date", "_eps"]]
+    except Exception:
         return pd.DataFrame(columns=["_date", "_eps"])
-    x = df[[date_col, eps_col]].copy()
-    x["_date"] = pd.to_datetime(x[date_col], errors="coerce")
-    x["_eps"] = x[eps_col].apply(_safe_float)
-    x = x.dropna(subset=["_date", "_eps"])
-    x = x.sort_values("_date").drop_duplicates(subset=["_date"], keep="last").reset_index(drop=True)
-    return x[["_date", "_eps"]]
 
 
 def calculate_earnings_realization_score(operating_cashflow_ratio=None, profit_growth=None, data_confidence="低"):
@@ -164,8 +71,11 @@ def calculate_earnings_realization_score(operating_cashflow_ratio=None, profit_g
     return {"score": round(score), "coefficient": round(coeff, 3), "level": level}
 
 
-def build_earnings_basis(indicators, annual_eps=None, operating_cashflow_ratio=None, profit_growth=None, stock_code=None):
-    """构建年度EPS、TTM EPS、正常化EPS。"""
+def build_earnings_basis(indicators, annual_eps=None, operating_cashflow_ratio=None, profit_growth=None, stock_code=None, profit_report=None):
+    """构建年度EPS、TTM EPS、正常化EPS。
+
+    注意：stock_code 参数仅为兼容旧调用保留，不会触发网络请求。
+    """
     result = {
         "annual_eps": _safe_float(annual_eps),
         "latest_eps": None,
@@ -185,24 +95,20 @@ def build_earnings_basis(indicators, annual_eps=None, operating_cashflow_ratio=N
         "ttm_formula": None,
     }
 
-    code = stock_code or _code(indicators) or _current_stock_code()
-    report_df = _refresh_profit_report(code)
+    # 只使用已经加载的数据：利润表优先，财务指标其次。
     report_series = _series_from_df(
-        report_df,
+        profit_report,
         ["REPORT_DATE", "报告日期", "报告期", "截止日期", "日期"],
-        ["基本每股收益", "基本每股收益(元)", "基本每股收益（元）", "每股收益", "每股收益(元)", "每股收益（元）", "EPSJB"],
+        ["基本每股收益", "基本每股收益(元)", "基本每股收益（元）", "每股收益", "每股收益(元)", "每股收益（元）", "EPSJB", "基本每股收益（元/股）", "基本每股收益(元/股)"],
     )
-
-    indicator_df = _refresh_indicator(indicators, code)
     indicator_series = _series_from_df(
-        indicator_df,
+        indicators,
         ["REPORT_DATE", "日期", "报告期", "报告日期", "截止日期"],
         ["EPSJB", "基本每股收益(元)", "基本每股收益", "摊薄每股收益(元)", "摊薄每股收益", "每股收益(元)", "每股收益"],
     )
 
-    # 利润表优先；只有利润表无法提供有效EPS时才使用财务指标。
     x = report_series if not report_series.empty else indicator_series
-    source_name = "东方财富利润表-按报告期" if not report_series.empty else "东方财富财务指标-按报告期"
+    source_name = "已加载利润表" if not report_series.empty else "已加载财务指标"
     confidence = "高" if not x.empty else "低"
 
     if x.empty:
