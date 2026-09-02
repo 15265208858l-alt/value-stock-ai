@@ -8,11 +8,17 @@ import streamlit as st
 from commercial_guard import is_pro, trial_status
 from membership import plan_catalog
 from user_store import get_membership
-from account import current_account
+
+ACCOUNT_KEY = "vs_account"
+
+
+def _current_account():
+    value = st.session_state.get(ACCOUNT_KEY)
+    return value if isinstance(value, dict) else None
 
 
 def render_membership_center() -> None:
-    account = current_account()
+    account = _current_account()
     status = trial_status()
     plan = "pro" if is_pro() else "free"
 
