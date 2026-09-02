@@ -14,6 +14,7 @@ from investment_score import calculate_investment_score
 from investment_decision import make_investment_decision
 from industry import get_peer_candidates, get_stock_name
 from commercial_guard import install_ui_notice
+from account import render_account_panel
 from watchlist_v2 import render_watchlist_dashboard, record_research_snapshot
 
 st.set_page_config(page_title="A股价值研投 | ValueStock AI", page_icon="📈", layout="wide")
@@ -52,6 +53,7 @@ button[kind="primary"]{background:linear-gradient(135deg,var(--vs-gold2),var(--v
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="vs-brand"><div><div class="vs-brand-main">📈 A股价值研投</div><div class="vs-brand-sub">ValueStock AI · 长期价值投资研究平台</div></div><div class="vs-brand-pill">长期价值 · 安全边际</div></div>', unsafe_allow_html=True)
+render_account_panel()
 install_ui_notice()
 st.markdown('<div class="vs-search-title">🔎 研究一家A股公司</div><div class="vs-search-sub">输入股票代码，快速查看企业质量、估值、安全边际与投资决策。</div><div class="vs-search-tip">📱 手机端优化：结论优先、关键指标卡片化、详细数据向下展开。</div>', unsafe_allow_html=True)
 code_input=st.text_input("A股股票代码",placeholder="例如：000333",label_visibility="collapsed")
