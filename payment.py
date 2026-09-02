@@ -1,15 +1,16 @@
-"""A股价值研投｜支付接口 V1
+"""A股价值研投｜支付接口 V2
 
-支持后续接入微信支付 Native/JSAPI 或其他支付渠道。
-密钥只从环境变量读取，不进入 GitHub。
-当前没有真实商户参数时，页面自动显示“待配置”，不产生虚假支付订单。
+当前实现：支付配置检查 + 订单号生成 + 统一订单状态入口。
+真实微信 Native 下单仍需使用官方商户接口与证书完成签名请求；密钥只从环境变量读取。
 """
 from __future__ import annotations
 
+import hashlib
 import os
+import time
 import uuid
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Dict
 
 
 @dataclass(frozen=True)
@@ -24,14 +25,7 @@ class PaymentConfig:
 
     @property
     def ready(self) -> bool:
-        return bool(
-            self.mchid
-            and self.appid
-            and self.api_v3_key
-            and self.merchant_serial_no
-            and self.private_key
-            and self.notify_url
-        )
+        return bool(self.mchid and self.appid and self.api_v3_key and self.merchant_serial_no and self.private_key and self.notify_url)
 
 
 def load_payment_config() -> PaymentConfig:
@@ -46,34 +40,42 @@ def load_payment_config() -> PaymentConfig:
     )
 
 
-def create_order(user_id: str, plan: str = "pro", amount_fen: int = 9900) -> dict:
-    """创建支付订单参数草案。
+def make_order_no() -> str:
+    return "VS" + uuid.uuid4().hex[:24].upper()
 
-    未配置正式商户参数时不会调用支付平台，也不会伪造成功订单。
-    """
+
+def create_order(user_id: str, plan: str = "pro", amount_fen: int = 9900) -> Dict[str, Any]:
+    """返回统一支付订单草案；未完成官方签名请求前绝不伪造支付成功。"""
     cfg = load_payment_config()
-    order_no = "VS" + uuid.uuid4().hex[:24].upper()
+    order_no = make_order_no()
+    try:
+        amount_fen = int(amount_fen)
+    except (TypeError, ValueError):
+        amount_fen = 0
+    if amount_fen <= 0:
+        return {"ok": False, "configured": cfg.ready, "order_no": order_no, "message": "支付金额必须大于0。"}
+    if not user_id:
+        return {"ok": False, "configured": cfg.ready, "order_no": order_no, "message": "请先登录账号。"}
     if not cfg.ready:
-        return {
-            "ok": False,
-            "configured": False,
-            "order_no": order_no,
-            "message": "支付商户参数尚未配置，请先完成微信支付商户号与证书配置。",
-        }
-    if cfg.provider != "wechat":
-        return {
-            "ok": False,
-            "configured": True,
-            "order_no": order_no,
-            "message": f"暂未实现 {cfg.provider} 的真实下单适配器。",
-        }
+        return {"ok": False, "configured": False, "order_no": order_no, "message": "微信支付尚未配置。"}
     return {
         "ok": False,
         "configured": True,
         "order_no": order_no,
         "user_id": str(user_id),
-        "plan": plan,
-        "amount_fen": int(amount_fen),
+        "plan": str(plan),
+        "amount_fen": amount_fen,
         "notify_url": cfg.notify_url,
-        "message": "微信支付参数已配置；下一步接入官方 Native 下单接口与支付回调。",
+        "message": "支付参数已就绪，待接入微信官方 Native 下单请求。",
     }
+
+
+def verify_notify_signature(message: str, timestamp: str, nonce: str, signature: str) -> bool:
+    """预留回调验签位置；未实现前返回 False，避免误判支付成功。"""
+    return bool(message and timestamp and nonce and signature) and False
+
+
+def build_payment_test_reference(user_id: str, amount_fen: int) -> str:
+    """生成本地测试引用，不能作为真实支付成功凭证。"""
+    raw = f"{user_id}|{amount_fen}|{time.time_ns()}".encode("utf-8")
+    return "TEST_" + hashlib.sha256(raw).hexdigest()[:20].upper()
