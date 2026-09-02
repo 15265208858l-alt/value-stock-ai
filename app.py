@@ -14,7 +14,7 @@ from investment_score import calculate_investment_score
 from investment_decision import make_investment_decision
 from industry import get_peer_candidates, get_stock_name
 from commercial_guard import install_ui_notice
-from watchlist import render_watchlist
+from watchlist_v2 import render_watchlist_dashboard, record_research_snapshot
 
 st.set_page_config(page_title="A股价值研投 | ValueStock AI", page_icon="📈", layout="wide")
 
@@ -59,7 +59,7 @@ peer_input=st.text_input("同行股票代码",placeholder="同行可选填，例
 run=st.button("🔍 开始价值研究",type="primary",use_container_width=True)
 if not run:
     st.markdown('<div class="vs-hero"><div class="vs-hero-title">🧠 一套面向长期价值投资的A股研究框架</div><div class="vs-hero-text">不追热点，不靠单一指标。系统围绕企业质量、现金流、正常化EPS、行业自适应估值、历史估值、同行比较与安全边际，形成可复核的研究结论。</div></div><div class="vs-feature-grid"><div class="vs-feature"><b>📊 企业质量</b><span>ROE、成长、负债与5年财务质量</span></div><div class="vs-feature"><b>💰 AI估值</b><span>PE/PB、正常化EPS与情景估值</span></div><div class="vs-feature"><b>🛡️ 风险排查</b><span>现金流、应收、存货等核心风险</span></div><div class="vs-feature"><b>🎯 投资决策</b><span>评分、安全边际与建议仓位</span></div></div><div class="vs-plan"><div class="vs-plan-title">⭐ 专业会员功能正在规划</div><div class="vs-plan-text">后续将提供更深度的历史数据、重点股票跟踪、估值提醒、研究报告与个人股票池。当前版本先把核心研究引擎和移动端体验做到稳定可靠。</div></div>',unsafe_allow_html=True)
-    render_watchlist()
+    render_watchlist_dashboard()
     st.stop()
 code=clean_stock_code(code_input)
 if not code:
@@ -255,6 +255,23 @@ if score.get("relative_valuation_available"): st.write(f"同行相对估值：**
 st.header("🎯 十一、最终投资决策")
 decision=make_investment_decision(investment_score=score["score"],valuation_level=score["valuation_level"],historical_level=score["historical_level"],risk_level=score["risk_level"])
 a,b,c=st.columns(3); a.metric("投资决策",decision["decision"]); b.metric("建议操作",decision["action"]); c.metric("建议仓位",decision["position"]); st.info("💡 决策理由："+decision["reason"])
+
+record_research_snapshot(
+    code=code,
+    name=name,
+    price=price,
+    score=score.get("score"),
+    rating=score.get("rating"),
+    decision=decision.get("decision"),
+    action=decision.get("action"),
+    position=decision.get("position"),
+    normal_value=vr.get("normal"),
+    safety_margin=gap,
+    valuation_level=score.get("valuation_level"),
+    historical_level=score.get("historical_level"),
+    risk_level=score.get("risk_level"),
+)
+
 st.markdown('<div class="vs-explain"><b>🎯 核心研究结论</b></div>',unsafe_allow_html=True)
 a,b,c,d=st.columns(4); a.metric("综合评分",f"{score['score']}/100"); b.metric("中性合理价","暂无" if vr.get("normal") is None else f"{vr['normal']:.2f} 元"); c.metric("当前价格","暂无" if price is None else f"{price:.2f} 元"); d.metric("安全边际","暂无" if gap is None else f"{gap:+.1f}%")
 st.markdown(f'<div class="vs-company">{name} <span class="vs-badge">{score["rating"]}</span></div><div class="vs-explain">最终建议：<b>{decision["decision"]}</b>｜操作：{decision["action"]}｜仓位：{decision["position"]}<br>估值：{score["valuation_level"]}｜历史估值：{score["historical_level"]}｜风险：{score["risk_level"]}</div>',unsafe_allow_html=True)
@@ -276,7 +293,7 @@ if risk.get("risk_items"):
     st.subheader("⚠️ 核心风险")
     for x in risk["risk_items"]: st.write(f"- {x}")
 
-render_watchlist()
+render_watchlist_dashboard()
 
 st.header("🛠️ 十三、系统诊断")
 st.dataframe(pd.DataFrame({"模块":["fast_data.py","financial.py","risk.py","valuation.py","adaptive_valuation.py","earnings_basis.py","growth_quality.py","historical_valuation.py","peer_compare.py","industry.py","investment_score.py","investment_decision.py"],"状态":["✅","✅","✅","✅","✅","✅" if earn.get("valuation_eps") is not None else "⏳","✅" if gq is not None else "⏳","✅" if hist is not None and not hist.empty else "⏳","✅" if peer_score is not None else "⏳","✅" if peer_codes else "⏳","✅","✅"]}),use_container_width=True,hide_index=True)
