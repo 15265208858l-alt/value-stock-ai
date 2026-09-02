@@ -1,4 +1,4 @@
-"""ValueStock AI fast data layer V20：并发、短超时、TTL缓存，避免页面长时间卡住。"""
+"""ValueStock AI fast data layer V21：并发、短超时、TTL缓存，并强化数据完整度判定。"""
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
 import time
 import pandas as pd
@@ -11,10 +11,13 @@ def clean_stock_code(code):
     s=str(code or "").strip()
     return s if len(s)==6 and s.isdigit() else ""
 
+def _valid_df(x):
+    return x is not None and hasattr(x,"empty") and not x.empty
+
 def _safe_call(fn):
     try:
         x=fn()
-        if x is not None and hasattr(x,"empty") and not x.empty: return x
+        if _valid_df(x): return x
     except Exception: pass
     return None
 
@@ -44,7 +47,7 @@ def _market(code,hist):
         name=get_stock_name(code) or code
     except Exception: pass
     price=change=None
-    if hist is not None and not hist.empty:
+    if _valid_df(hist):
         cc="收盘" if "收盘" in hist.columns else "close"
         try: price=float(hist.iloc[-1][cc])
         except Exception: pass
@@ -63,7 +66,6 @@ def _run_tasks(tasks,workers=5,timeout=FETCH_TIMEOUT):
             try: out[key]=f.result()
             except Exception: out[key]=None
     except TimeoutError:
-        # 超时模块直接降级，不阻塞整个研究页面。
         pass
     finally:
         for f in fs:
@@ -84,7 +86,7 @@ def load_stock_data_fast(code):
     return out
 
 def get_latest_price(history):
-    if history is None or history.empty: return None
+    if not _valid_df(history): return None
     for c in ("收盘","close"):
         if c in history.columns:
             try: return float(history.iloc[-1][c])
@@ -92,8 +94,18 @@ def get_latest_price(history):
     return None
 
 def check_data_completeness(data):
+    """完整度必须基于真实有效内容，而不是仅判断对象是否存在。"""
     if not data: return {"score":0,"available":0,"total":7,"level":"无数据"}
-    checks=[data.get("market") is not None,data.get("history") is not None,data.get("indicators") is not None,data.get("profit") is not None,data.get("balance") is not None,data.get("cashflow") is not None,data.get("code") is not None]
+    market=data.get("market") or {}
+    checks=[
+        market.get("最新价") is not None,
+        _valid_df(data.get("history")),
+        _valid_df(data.get("indicators")),
+        _valid_df(data.get("profit")),
+        _valid_df(data.get("balance")),
+        _valid_df(data.get("cashflow")),
+        bool(data.get("code")),
+    ]
     n=sum(checks); score=round(n/7*100)
     return {"score":score,"available":n,"total":7,"level":"优秀" if score>=90 else "良好" if score>=75 else "一般" if score>=60 else "较弱"}
 
