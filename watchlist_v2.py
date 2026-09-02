@@ -1,8 +1,8 @@
-"""A股价值研投｜我的股票池 V2
+"""A股价值研投｜我的股票池 V3
 
 商业层模块，不修改核心研究引擎。
-V2：展示已完成研究的最新快照，并提供轻量价格提醒与研究报告下载。
-当前仍使用 Streamlit session state；正式商业版应迁移到服务端数据库。
+V3：研究快照 + 价格提醒 + 研究报告，并统一执行会员权限。
+当前仍使用 Streamlit session state；正式商业版应迁移到服务端数据库与账号体系。
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ import streamlit as st
 
 from valuation_alert import evaluate_alert, remove_alert, set_alert
 from research_report import build_research_report
+from commercial_guard import is_pro
 
 WATCHLIST_KEY = "vs_watchlist"
 SNAPSHOT_KEY = "vs_research_snapshots"
@@ -33,6 +34,9 @@ def get_watchlist() -> List[str]:
 
 
 def add_stock(code: str) -> bool:
+    """加入股票池；正式商业功能仅对 Pro 开放。"""
+    if not is_pro():
+        return False
     code = _clean_code(code)
     if not code:
         return False
@@ -47,11 +51,15 @@ def add_stock(code: str) -> bool:
 
 
 def remove_stock(code: str) -> None:
+    if not is_pro():
+        return
     code = _clean_code(code)
     st.session_state[WATCHLIST_KEY] = [x for x in get_watchlist() if x != code]
 
 
 def clear_watchlist() -> None:
+    if not is_pro():
+        return
     st.session_state[WATCHLIST_KEY] = []
 
 
@@ -132,7 +140,10 @@ def _to_float(text: Any) -> Any:
 
 
 def _render_alert_editor(code: str, snapshot: Dict[str, Any]) -> None:
-    """轻量配置：只保存用户主动设置的两个价格。"""
+    if not is_pro():
+        st.warning("🔒 价格提醒为专业会员功能。升级后可为重点股票设置建仓价与重仓价提醒。")
+        return
+
     st.markdown(f"**🔔 {snapshot.get('name', code)} 提醒设置**")
     current = st.session_state.get("vs_valuation_alerts", {}).get(code, {})
     entry_default = current.get("entry_price")
@@ -170,10 +181,13 @@ def _render_alert_editor(code: str, snapshot: Dict[str, Any]) -> None:
 
 
 def render_research_report_panel(code: str, snapshot: Dict[str, Any]) -> None:
-    """为已完成研究的股票提供 Markdown 报告下载。"""
     if not snapshot:
         st.info("ℹ️ 该股票尚未完成研究，暂无可生成的报告。")
         return
+    if not is_pro():
+        st.warning("🔒 专业研究报告为 Pro 功能。当前免费版可体验核心研究，升级后解锁报告导出。")
+        return
+
     name = snapshot.get("name", code)
     report = build_research_report(snapshot)
     filename = f"A股价值研投_{code}_{str(name).replace('/', '_')}_研究报告.md"
@@ -191,6 +205,12 @@ def render_research_report_panel(code: str, snapshot: Dict[str, Any]) -> None:
 def render_watchlist_dashboard() -> None:
     st.markdown("---")
     st.subheader("⭐ 我的股票池 · 研究跟踪")
+
+    if not is_pro():
+        st.info("🔒 **我的股票池为专业会员功能**。免费版可以完整研究 1 只股票；升级后可建立最多 20 只重点股票池，并使用价格提醒与专业研究报告。")
+        st.caption("商业原则：免费版负责体验核心研究价值，Pro 负责持续跟踪与效率提升。")
+        return
+
     st.caption("展示已经完成研究的最新快照；提醒只做价格状态判断，报告用于研究整理，不发送外部消息。")
 
     items = get_watchlist()
@@ -264,4 +284,4 @@ def render_watchlist_dashboard() -> None:
                 else:
                     st.info("该股票不在当前股票池。")
 
-    st.caption("🔐 当前 V2 为会话原型；正式收费版必须使用服务端账户、数据库与权限校验。")
+    st.caption("🔐 当前为会话原型；正式收费版必须使用服务端账户、数据库、订单与权限校验。")
