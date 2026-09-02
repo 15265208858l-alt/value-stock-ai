@@ -1,4 +1,4 @@
-"""ValueStock AI fast data layer V22：并发、缓存、结构化财务主链路。"""
+"""ValueStock AI fast data layer V23：并发、缓存、结构化财务主链路。"""
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
 import time
 import pandas as pd
@@ -8,50 +8,48 @@ _STOCK_CACHE={}; _PEER_CACHE={}
 STOCK_TTL=300; PEER_TTL=600; FETCH_TIMEOUT=18
 
 def clean_stock_code(code):
-    s=str(code or "").strip()
-    return s if len(s)==6 and s.isdigit() else ""
+    s=str(code or "").strip(); return s if len(s)==6 and s.isdigit() else ""
 
-def _valid_df(x):
-    return x is not None and hasattr(x,"empty") and not x.empty
+def _valid_df(x): return x is not None and hasattr(x,"empty") and not x.empty
 
 def _safe_call(fn):
     try:
-        x=fn()
-        return x if _valid_df(x) else None
-    except Exception:
-        return None
+        x=fn(); return x if _valid_df(x) else None
+    except Exception: return None
 
-def _market_symbol(code):
-    return ("SH" if code.startswith(("6","68")) else "SZ" if code.startswith(("0","3")) else "BJ") + code
+def _market_symbol(code): return ("SH" if code.startswith(("6","68")) else "SZ" if code.startswith(("0","3")) else "BJ")+code
 
-def _market_prefix(code):
-    return "sh" if code.startswith(("6","68")) else "sz" if code.startswith(("0","3")) else "bj"
+def _market_prefix(code): return "sh" if code.startswith(("6","68")) else "sz" if code.startswith(("0","3")) else "bj"
 
 def _history(code):
     x=_safe_call(lambda: ak.stock_zh_a_hist(symbol=code,period="daily",start_date="20200101",end_date="20500101",adjust=""))
-    if x is None:
-        x=_safe_call(lambda: ak.stock_zh_a_hist_tx(symbol=_market_prefix(code)+code,start_date="20200101",end_date="20500101",adjust=""))
+    if x is None: x=_safe_call(lambda: ak.stock_zh_a_hist_tx(symbol=_market_prefix(code)+code,start_date="20200101",end_date="20500101",adjust=""))
     if x is None: return None
     return x.rename(columns={"date":"日期","close":"收盘","open":"开盘","high":"最高","low":"最低","volume":"成交量","amount":"成交额"})
 
 def _indicators(code):
-    """优先东财结构化“按报告期”，新浪老接口仅作备用。"""
-    symbol=_market_symbol(code)
-    x=_safe_call(lambda: ak.stock_financial_analysis_indicator_em(symbol=symbol,indicator="按报告期"))
-    if x is not None:
-        return x
+    """优先东财结构化按报告期，新浪老接口仅作备用。"""
+    x=_safe_call(lambda: ak.stock_financial_analysis_indicator_em(symbol=_market_symbol(code),indicator="按报告期"))
+    if x is not None: return x
     return _safe_call(lambda: ak.stock_financial_analysis_indicator(symbol=code))
 
 def _report(code,typ):
-    return _safe_call(lambda: ak.stock_financial_report_sina(stock=_market_prefix(code)+code,symbol=typ))
+    """三大报表统一整理为最新报告在第0行，兼容旧版app.py的读取方式。"""
+    x=_safe_call(lambda: ak.stock_financial_report_sina(stock=_market_prefix(code)+code,symbol=typ))
+    if x is None: return None
+    try:
+        for dc in ["报告日期","报告期","截止日期","REPORT_DATE","日期"]:
+            if dc in x.columns:
+                x=x.copy(); x["_sort_date"]=pd.to_datetime(x[dc],errors="coerce"); x=x.sort_values("_sort_date",ascending=False).drop(columns=["_sort_date"]).reset_index(drop=True); break
+    except Exception: pass
+    return x
 
 def _market(code,hist):
     name=code
     try:
         from industry import get_stock_name
         name=get_stock_name(code) or code
-    except Exception:
-        pass
+    except Exception: pass
     price=change=None
     if _valid_df(hist):
         cc="收盘" if "收盘" in hist.columns else "close"
@@ -63,16 +61,13 @@ def _market(code,hist):
     return {"代码":code,"名称":name,"最新价":price,"涨跌幅":change}
 
 def _run_tasks(tasks,workers=5,timeout=FETCH_TIMEOUT):
-    out={}
-    ex=ThreadPoolExecutor(max_workers=workers)
-    fs={ex.submit(fn):key for key,fn in tasks.items()}
+    out={}; ex=ThreadPoolExecutor(max_workers=workers); fs={ex.submit(fn):key for key,fn in tasks.items()}
     try:
         for f in as_completed(fs,timeout=timeout):
             key=fs[f]
             try: out[key]=f.result()
             except Exception: out[key]=None
-    except TimeoutError:
-        pass
+    except TimeoutError: pass
     finally:
         for f in fs:
             if not f.done(): f.cancel()
@@ -85,17 +80,8 @@ def load_stock_data_fast(code):
     if not code: return None
     now=time.time(); cached=_STOCK_CACHE.get(code)
     if cached and now-cached[0]<STOCK_TTL: return cached[1]
-    tasks={
-        "history":lambda:_history(code),
-        "indicators":lambda:_indicators(code),
-        "profit":lambda:_report(code,"利润表"),
-        "balance":lambda:_report(code,"资产负债表"),
-        "cashflow":lambda:_report(code,"现金流量表"),
-    }
-    out={"code":code,**_run_tasks(tasks,workers=5)}
-    out["market"]=_market(code,out["history"])
-    _STOCK_CACHE[code]=(now,out)
-    return out
+    tasks={"history":lambda:_history(code),"indicators":lambda:_indicators(code),"profit":lambda:_report(code,"利润表"),"balance":lambda:_report(code,"资产负债表"),"cashflow":lambda:_report(code,"现金流量表")}
+    out={"code":code,**_run_tasks(tasks,workers=5)}; out["market"]=_market(code,out["history"]); _STOCK_CACHE[code]=(now,out); return out
 
 def get_latest_price(history):
     if not _valid_df(history): return None
@@ -107,9 +93,7 @@ def get_latest_price(history):
 
 def check_data_completeness(data):
     if not data: return {"score":0,"available":0,"total":7,"level":"无数据"}
-    market=data.get("market") or {}
-    checks=[market.get("最新价") is not None,_valid_df(data.get("history")),_valid_df(data.get("indicators")),_valid_df(data.get("profit")),_valid_df(data.get("balance")),_valid_df(data.get("cashflow")),bool(data.get("code"))]
-    n=sum(checks); score=round(n/7*100)
+    market=data.get("market") or {}; checks=[market.get("最新价") is not None,_valid_df(data.get("history")),_valid_df(data.get("indicators")),_valid_df(data.get("profit")),_valid_df(data.get("balance")),_valid_df(data.get("cashflow")),bool(data.get("code"))]; n=sum(checks); score=round(n/7*100)
     return {"score":score,"available":n,"total":7,"level":"优秀" if score>=90 else "良好" if score>=75 else "一般" if score>=60 else "较弱"}
 
 def load_peer_snapshots(codes_tuple):
@@ -118,12 +102,9 @@ def load_peer_snapshots(codes_tuple):
     key=",".join(codes); now=time.time(); cached=_PEER_CACHE.get(key)
     if cached and now-cached[0]<PEER_TTL: return cached[1]
     def one(code): return code,_history(code),_indicators(code)
-    tasks={f"p{i}":(lambda c=c:one(c)) for i,c in enumerate(codes)}
-    raw=_run_tasks(tasks,workers=min(5,max(1,len(codes))))
-    out={}
+    tasks={f"p{i}":(lambda c=c:one(c)) for i,c in enumerate(codes)}; raw=_run_tasks(tasks,workers=min(5,max(1,len(codes)))); out={}
     for v in raw.values():
         try:
             code,h,ind=v; out[code]={"history":h,"indicators":ind,"market":_market(code,h)}
         except Exception: pass
-    _PEER_CACHE[key]=(now,out)
-    return out
+    _PEER_CACHE[key]=(now,out); return out
