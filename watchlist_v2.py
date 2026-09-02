@@ -1,7 +1,7 @@
 """A股价值研投｜我的股票池 V2
 
 商业层模块，不修改核心研究引擎。
-V2：展示已完成研究的最新快照，并提供轻量价格提醒配置。
+V2：展示已完成研究的最新快照，并提供轻量价格提醒与研究报告下载。
 当前仍使用 Streamlit session state；正式商业版应迁移到服务端数据库。
 """
 
@@ -13,6 +13,7 @@ from typing import Any, Dict, List
 import streamlit as st
 
 from valuation_alert import evaluate_alert, remove_alert, set_alert
+from research_report import build_research_report
 
 WATCHLIST_KEY = "vs_watchlist"
 SNAPSHOT_KEY = "vs_research_snapshots"
@@ -168,10 +169,29 @@ def _render_alert_editor(code: str, snapshot: Dict[str, Any]) -> None:
     st.caption(f"当前状态：{evaluate_alert(code, snapshot.get('price'))}")
 
 
+def render_research_report_panel(code: str, snapshot: Dict[str, Any]) -> None:
+    """为已完成研究的股票提供 Markdown 报告下载。"""
+    if not snapshot:
+        st.info("ℹ️ 该股票尚未完成研究，暂无可生成的报告。")
+        return
+    name = snapshot.get("name", code)
+    report = build_research_report(snapshot)
+    filename = f"A股价值研投_{code}_{str(name).replace('/', '_')}_研究报告.md"
+    st.download_button(
+        "📄 下载价值研究报告",
+        data=report.encode("utf-8"),
+        file_name=filename,
+        mime="text/markdown",
+        use_container_width=True,
+        key=f"vs_report_download_{code}",
+    )
+    st.caption("报告基于最近一次成功研究快照生成；适合保存、分享与后续人工复核。")
+
+
 def render_watchlist_dashboard() -> None:
     st.markdown("---")
     st.subheader("⭐ 我的股票池 · 研究跟踪")
-    st.caption("展示已经完成研究的最新快照；提醒只做价格状态判断，不发送外部消息。")
+    st.caption("展示已经完成研究的最新快照；提醒只做价格状态判断，报告用于研究整理，不发送外部消息。")
 
     items = get_watchlist()
     snapshots = _snapshots()
@@ -204,6 +224,15 @@ def render_watchlist_dashboard() -> None:
                 key="vs_alert_target",
             )
             _render_alert_editor(target, snapshots.get(target, {}))
+
+        with st.expander("📄 生成研究报告", expanded=False):
+            report_target = st.selectbox(
+                "选择已完成研究的股票",
+                items,
+                format_func=lambda x: f"{snapshots.get(x, {}).get('name', x)} ({x})",
+                key="vs_report_target",
+            )
+            render_research_report_panel(report_target, snapshots.get(report_target, {}))
 
         c1, c2 = st.columns(2)
         with c1:
