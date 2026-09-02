@@ -1,5 +1,5 @@
-"""A股价值研投｜会员中心 V1
-商业展示层：展示账号、会员权益与升级入口，不接支付。
+"""A股价值研投｜会员中心 V2
+商业展示层：展示账号、会员权益与升级入口，并预留微信支付入口。
 """
 from __future__ import annotations
 
@@ -8,8 +8,10 @@ import streamlit as st
 from commercial_guard import is_pro, trial_status
 from membership import plan_catalog
 from user_store import get_membership
+from payment import create_order, load_payment_config
 
 ACCOUNT_KEY = "vs_account"
+PRO_PRICE_YUAN = 99
 
 
 def _current_account():
@@ -52,6 +54,17 @@ def render_membership_center() -> None:
                 if plan == "pro":
                     st.success("当前已是专业会员")
                 else:
-                    st.button("⭐ 专业会员｜即将开放", disabled=True, use_container_width=True, key="vs_member_upgrade")
+                    st.markdown(f"**专业会员：¥{PRO_PRICE_YUAN}/月**")
+                    cfg = load_payment_config()
+                    if cfg.ready and account:
+                        if st.button("💳 微信支付开通", type="primary", use_container_width=True, key="vs_member_pay"):
+                            order = create_order(account.get("user_id", ""), "pro", PRO_PRICE_YUAN * 100)
+                            if order.get("ok"):
+                                st.success("支付订单已创建")
+                            else:
+                                st.info(order.get("message", "支付接口待完善"))
+                    else:
+                        st.button("💳 微信支付开通｜待配置", disabled=True, use_container_width=True, key="vs_member_pay_disabled")
+                        st.caption("配置商户号、APPID、API v3 Key、商户证书与支付回调地址后启用。")
 
-    st.caption("当前阶段暂不接入支付。正式收费前将接入服务端订单、支付回调、会员到期校验与风控。")
+    st.caption("支付采用环境变量保存敏感参数；正式上线需接通微信官方下单、支付成功回调、订单核验与会员自动开通。")
