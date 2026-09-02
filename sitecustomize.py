@@ -62,6 +62,12 @@ def _install_ui():
                 state["installed"] = True
                 original_markdown(css, unsafe_allow_html=True)
                 original_markdown(hero, unsafe_allow_html=True)
+                try:
+                    from commercial_guard import install_fast_data_guard, install_ui_notice
+                    install_fast_data_guard()
+                    install_ui_notice()
+                except Exception:
+                    pass
             return result
 
         st.set_page_config = patched_set_page_config
