@@ -56,6 +56,12 @@ def _install_ui():
         </div>
         '''
 
+        try:
+            from commercial_guard import install_fast_data_guard
+            install_fast_data_guard()
+        except Exception:
+            pass
+
         def patched_set_page_config(*args, **kwargs):
             result = original_set_page_config(*args, **kwargs)
             if not state["installed"]:
@@ -63,8 +69,7 @@ def _install_ui():
                 original_markdown(css, unsafe_allow_html=True)
                 original_markdown(hero, unsafe_allow_html=True)
                 try:
-                    from commercial_guard import install_fast_data_guard, install_ui_notice
-                    install_fast_data_guard()
+                    from commercial_guard import install_ui_notice
                     install_ui_notice()
                 except Exception:
                     pass
