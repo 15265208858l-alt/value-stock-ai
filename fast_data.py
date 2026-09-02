@@ -1,4 +1,4 @@
-"""ValueStock AI fast data layer V21：并发、短超时、TTL缓存，并强化数据完整度判定。"""
+"""ValueStock AI fast data layer V22：并发、缓存、结构化财务主链路。"""
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
 import time
 import pandas as pd
@@ -17,35 +17,41 @@ def _valid_df(x):
 def _safe_call(fn):
     try:
         x=fn()
-        if _valid_df(x): return x
-    except Exception: pass
-    return None
+        return x if _valid_df(x) else None
+    except Exception:
+        return None
+
+def _market_symbol(code):
+    return ("SH" if code.startswith(("6","68")) else "SZ" if code.startswith(("0","3")) else "BJ") + code
+
+def _market_prefix(code):
+    return "sh" if code.startswith(("6","68")) else "sz" if code.startswith(("0","3")) else "bj"
 
 def _history(code):
     x=_safe_call(lambda: ak.stock_zh_a_hist(symbol=code,period="daily",start_date="20200101",end_date="20500101",adjust=""))
     if x is None:
-        market="sh"+code if code.startswith("6") else "sz"+code
-        x=_safe_call(lambda: ak.stock_zh_a_hist_tx(symbol=market,start_date="20200101",end_date="20500101",adjust=""))
+        x=_safe_call(lambda: ak.stock_zh_a_hist_tx(symbol=_market_prefix(code)+code,start_date="20200101",end_date="20500101",adjust=""))
     if x is None: return None
     return x.rename(columns={"date":"日期","close":"收盘","open":"开盘","high":"最高","low":"最低","volume":"成交量","amount":"成交额"})
 
 def _indicators(code):
-    x=_safe_call(lambda: ak.stock_financial_analysis_indicator(symbol=code))
-    if x is None:
-        symbol="SH"+code if code.startswith("6") else "SZ"+code
-        x=_safe_call(lambda: ak.stock_financial_analysis_indicator_em(symbol=symbol,indicator="按报告期"))
-    return x
+    """优先东财结构化“按报告期”，新浪老接口仅作备用。"""
+    symbol=_market_symbol(code)
+    x=_safe_call(lambda: ak.stock_financial_analysis_indicator_em(symbol=symbol,indicator="按报告期"))
+    if x is not None:
+        return x
+    return _safe_call(lambda: ak.stock_financial_analysis_indicator(symbol=code))
 
 def _report(code,typ):
-    market="sh"+code if code.startswith("6") else "sz"+code
-    return _safe_call(lambda: ak.stock_financial_report_sina(stock=market,symbol=typ))
+    return _safe_call(lambda: ak.stock_financial_report_sina(stock=_market_prefix(code)+code,symbol=typ))
 
 def _market(code,hist):
     name=code
     try:
         from industry import get_stock_name
         name=get_stock_name(code) or code
-    except Exception: pass
+    except Exception:
+        pass
     price=change=None
     if _valid_df(hist):
         cc="收盘" if "收盘" in hist.columns else "close"
@@ -79,7 +85,13 @@ def load_stock_data_fast(code):
     if not code: return None
     now=time.time(); cached=_STOCK_CACHE.get(code)
     if cached and now-cached[0]<STOCK_TTL: return cached[1]
-    tasks={"history":lambda:_history(code),"indicators":lambda:_indicators(code),"profit":lambda:_report(code,"利润表"),"balance":lambda:_report(code,"资产负债表"),"cashflow":lambda:_report(code,"现金流量表")}
+    tasks={
+        "history":lambda:_history(code),
+        "indicators":lambda:_indicators(code),
+        "profit":lambda:_report(code,"利润表"),
+        "balance":lambda:_report(code,"资产负债表"),
+        "cashflow":lambda:_report(code,"现金流量表"),
+    }
     out={"code":code,**_run_tasks(tasks,workers=5)}
     out["market"]=_market(code,out["history"])
     _STOCK_CACHE[code]=(now,out)
@@ -94,18 +106,9 @@ def get_latest_price(history):
     return None
 
 def check_data_completeness(data):
-    """完整度必须基于真实有效内容，而不是仅判断对象是否存在。"""
     if not data: return {"score":0,"available":0,"total":7,"level":"无数据"}
     market=data.get("market") or {}
-    checks=[
-        market.get("最新价") is not None,
-        _valid_df(data.get("history")),
-        _valid_df(data.get("indicators")),
-        _valid_df(data.get("profit")),
-        _valid_df(data.get("balance")),
-        _valid_df(data.get("cashflow")),
-        bool(data.get("code")),
-    ]
+    checks=[market.get("最新价") is not None,_valid_df(data.get("history")),_valid_df(data.get("indicators")),_valid_df(data.get("profit")),_valid_df(data.get("balance")),_valid_df(data.get("cashflow")),bool(data.get("code"))]
     n=sum(checks); score=round(n/7*100)
     return {"score":score,"available":n,"total":7,"level":"优秀" if score>=90 else "良好" if score>=75 else "一般" if score>=60 else "较弱"}
 
