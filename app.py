@@ -14,7 +14,8 @@ from investment_score import calculate_investment_score
 from investment_decision import make_investment_decision
 from industry import get_peer_candidates, get_stock_name
 from commercial_guard import install_ui_notice
-from account import render_account_panel
+from account import current_account, render_account_panel
+from user_store import save_research_snapshot
 from watchlist_v2 import render_watchlist_dashboard, record_research_snapshot
 
 st.set_page_config(page_title="A股价值研投 | ValueStock AI", page_icon="📈", layout="wide")
@@ -258,21 +259,28 @@ st.header("🎯 十一、最终投资决策")
 decision=make_investment_decision(investment_score=score["score"],valuation_level=score["valuation_level"],historical_level=score["historical_level"],risk_level=score["risk_level"])
 a,b,c=st.columns(3); a.metric("投资决策",decision["decision"]); b.metric("建议操作",decision["action"]); c.metric("建议仓位",decision["position"]); st.info("💡 决策理由："+decision["reason"])
 
-record_research_snapshot(
-    code=code,
-    name=name,
-    price=price,
-    score=score.get("score"),
-    rating=score.get("rating"),
-    decision=decision.get("decision"),
-    action=decision.get("action"),
-    position=decision.get("position"),
-    normal_value=vr.get("normal"),
-    safety_margin=gap,
-    valuation_level=score.get("valuation_level"),
-    historical_level=score.get("historical_level"),
-    risk_level=score.get("risk_level"),
-)
+snapshot={
+    "code":code,
+    "name":name,
+    "price":price,
+    "score":score.get("score"),
+    "rating":score.get("rating"),
+    "decision":decision.get("decision"),
+    "action":decision.get("action"),
+    "position":decision.get("position"),
+    "normal_value":vr.get("normal"),
+    "safety_margin":gap,
+    "valuation_level":score.get("valuation_level"),
+    "historical_level":score.get("historical_level"),
+    "risk_level":score.get("risk_level"),
+}
+record_research_snapshot(**snapshot)
+account=current_account()
+if account:
+    try:
+        save_research_snapshot(account.get("user_id", ""), snapshot)
+    except Exception:
+        pass
 
 st.markdown('<div class="vs-explain"><b>🎯 核心研究结论</b></div>',unsafe_allow_html=True)
 a,b,c,d=st.columns(4); a.metric("综合评分",f"{score['score']}/100"); b.metric("中性合理价","暂无" if vr.get("normal") is None else f"{vr['normal']:.2f} 元"); c.metric("当前价格","暂无" if price is None else f"{price:.2f} 元"); d.metric("安全边际","暂无" if gap is None else f"{gap:+.1f}%")
