@@ -1,4 +1,4 @@
-"""ValueStock AI fast data layer V23：并发、缓存、结构化财务主链路。"""
+"""ValueStock AI fast data layer V24：并发、缓存、结构化财务主链路。"""
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
 import time
 import pandas as pd
@@ -17,7 +17,9 @@ def _safe_call(fn):
         x=fn(); return x if _valid_df(x) else None
     except Exception: return None
 
-def _market_symbol(code): return ("SH" if code.startswith(("6","68")) else "SZ" if code.startswith(("0","3")) else "BJ")+code
+def _market_symbol(code):
+    # 当前 AKShare stock_financial_analysis_indicator_em 使用 000001.SZ / 600519.SH 口径。
+    return code + (".SH" if code.startswith(("6","68")) else ".SZ" if code.startswith(("0","3")) else ".BJ")
 
 def _market_prefix(code): return "sh" if code.startswith(("6","68")) else "sz" if code.startswith(("0","3")) else "bj"
 
@@ -28,19 +30,17 @@ def _history(code):
     return x.rename(columns={"date":"日期","close":"收盘","open":"开盘","high":"最高","low":"最低","volume":"成交量","amount":"成交额"})
 
 def _indicators(code):
-    """优先东财结构化按报告期，新浪老接口仅作备用。"""
     x=_safe_call(lambda: ak.stock_financial_analysis_indicator_em(symbol=_market_symbol(code),indicator="按报告期"))
     if x is not None: return x
     return _safe_call(lambda: ak.stock_financial_analysis_indicator(symbol=code))
 
 def _report(code,typ):
-    """三大报表统一整理为最新报告在第0行，兼容旧版app.py的读取方式。"""
     x=_safe_call(lambda: ak.stock_financial_report_sina(stock=_market_prefix(code)+code,symbol=typ))
     if x is None: return None
     try:
         for dc in ["报告日期","报告期","截止日期","REPORT_DATE","日期"]:
             if dc in x.columns:
-                x=x.copy(); x["_sort_date"]=pd.to_datetime(x[dc],errors="coerce"); x=x.sort_values("_sort_date",ascending=False).drop(columns=["_sort_date"]).reset_index(drop=True); break
+                y=x.copy(); y["_sort_date"]=pd.to_datetime(y[dc],errors="coerce"); y=y.sort_values("_sort_date",ascending=False).drop(columns=["_sort_date"]).reset_index(drop=True); return y
     except Exception: pass
     return x
 
