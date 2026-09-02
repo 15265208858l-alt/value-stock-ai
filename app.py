@@ -13,6 +13,8 @@ from peer_compare import calculate_peer_score, build_peer_summary, compare_targe
 from investment_score import calculate_investment_score
 from investment_decision import make_investment_decision
 from industry import get_peer_candidates, get_stock_name
+from commercial_guard import install_ui_notice
+from watchlist import render_watchlist
 
 st.set_page_config(page_title="A股价值研投 | ValueStock AI", page_icon="📈", layout="wide")
 
@@ -50,12 +52,14 @@ button[kind="primary"]{background:linear-gradient(135deg,var(--vs-gold2),var(--v
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="vs-brand"><div><div class="vs-brand-main">📈 A股价值研投</div><div class="vs-brand-sub">ValueStock AI · 长期价值投资研究平台</div></div><div class="vs-brand-pill">长期价值 · 安全边际</div></div>', unsafe_allow_html=True)
+install_ui_notice()
 st.markdown('<div class="vs-search-title">🔎 研究一家A股公司</div><div class="vs-search-sub">输入股票代码，快速查看企业质量、估值、安全边际与投资决策。</div><div class="vs-search-tip">📱 手机端优化：结论优先、关键指标卡片化、详细数据向下展开。</div>', unsafe_allow_html=True)
 code_input=st.text_input("A股股票代码",placeholder="例如：000333",label_visibility="collapsed")
 peer_input=st.text_input("同行股票代码",placeholder="同行可选填，例如：000651,600690",label_visibility="collapsed")
 run=st.button("🔍 开始价值研究",type="primary",use_container_width=True)
 if not run:
     st.markdown('<div class="vs-hero"><div class="vs-hero-title">🧠 一套面向长期价值投资的A股研究框架</div><div class="vs-hero-text">不追热点，不靠单一指标。系统围绕企业质量、现金流、正常化EPS、行业自适应估值、历史估值、同行比较与安全边际，形成可复核的研究结论。</div></div><div class="vs-feature-grid"><div class="vs-feature"><b>📊 企业质量</b><span>ROE、成长、负债与5年财务质量</span></div><div class="vs-feature"><b>💰 AI估值</b><span>PE/PB、正常化EPS与情景估值</span></div><div class="vs-feature"><b>🛡️ 风险排查</b><span>现金流、应收、存货等核心风险</span></div><div class="vs-feature"><b>🎯 投资决策</b><span>评分、安全边际与建议仓位</span></div></div><div class="vs-plan"><div class="vs-plan-title">⭐ 专业会员功能正在规划</div><div class="vs-plan-text">后续将提供更深度的历史数据、重点股票跟踪、估值提醒、研究报告与个人股票池。当前版本先把核心研究引擎和移动端体验做到稳定可靠。</div></div>',unsafe_allow_html=True)
+    render_watchlist()
     st.stop()
 code=clean_stock_code(code_input)
 if not code:
@@ -174,7 +178,10 @@ pb=None if price is None or annual_bvps is None or annual_bvps<=0 else price/ann
 vr=calculate_valuation_scenarios(eps=valuation_eps,bvps=annual_bvps,conservative_pe=cfg["conservative_pe"],normal_pe=cfg["normal_pe"],optimistic_pe=cfg["optimistic_pe"],conservative_pb=cfg["conservative_pb"],normal_pb=cfg["normal_pb"],optimistic_pb=cfg["optimistic_pb"],pe_weight=cfg["pe_weight"],pb_weight=cfg["pb_weight"])
 a,b,c,d,e=st.columns(5)
 a.metric("当前PE（年度）","暂无" if annual_pe is None else f"{annual_pe:.2f}"); b.metric("当前PE（估值口径）","暂无" if valuation_pe is None else f"{valuation_pe:.2f}"); c.metric("当前PB","暂无" if pb is None else f"{pb:.2f}"); d.metric("中性合理价","暂无" if vr["normal"] is None else f"{vr['normal']:.2f} 元"); e.metric("建仓参考价","暂无" if vr["entry_price"] is None else f"{vr['entry_price']:.2f} 元")
-st.write(f"保守价值：{vr['conservative']:.2f} 元 ｜ 乐观价值：{vr['optimistic']:.2f} 元 ｜ 重仓参考价：{vr['heavy_price']:.2f} 元")
+cons_text="暂无" if vr.get("conservative") is None else f"{vr['conservative']:.2f} 元"
+opt_text="暂无" if vr.get("optimistic") is None else f"{vr['optimistic']:.2f} 元"
+heavy_text="暂无" if vr.get("heavy_price") is None else f"{vr['heavy_price']:.2f} 元"
+st.write(f"保守价值：{cons_text} ｜ 乐观价值：{opt_text} ｜ 重仓参考价：{heavy_text}")
 if vr.get("pe_values") or vr.get("pb_values"):
     st.caption("🔎 估值路径拆解")
     st.dataframe(pd.DataFrame({"情景":["保守","中性","乐观"],"PE路径价值":[vr.get("pe_values",{}).get("conservative"),vr.get("pe_values",{}).get("normal"),vr.get("pe_values",{}).get("optimistic")],"PB路径价值":[vr.get("pb_values",{}).get("conservative"),vr.get("pb_values",{}).get("normal"),vr.get("pb_values",{}).get("optimistic")],"综合价值":[vr.get("conservative"),vr.get("normal"),vr.get("optimistic")]}).round(2),use_container_width=True,hide_index=True)
@@ -268,6 +275,8 @@ st.info(conclusion)
 if risk.get("risk_items"):
     st.subheader("⚠️ 核心风险")
     for x in risk["risk_items"]: st.write(f"- {x}")
+
+render_watchlist()
 
 st.header("🛠️ 十三、系统诊断")
 st.dataframe(pd.DataFrame({"模块":["fast_data.py","financial.py","risk.py","valuation.py","adaptive_valuation.py","earnings_basis.py","growth_quality.py","historical_valuation.py","peer_compare.py","industry.py","investment_score.py","investment_decision.py"],"状态":["✅","✅","✅","✅","✅","✅" if earn.get("valuation_eps") is not None else "⏳","✅" if gq is not None else "⏳","✅" if hist is not None and not hist.empty else "⏳","✅" if peer_score is not None else "⏳","✅" if peer_codes else "⏳","✅","✅"]}),use_container_width=True,hide_index=True)
