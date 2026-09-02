@@ -1,8 +1,7 @@
 """A股价值研投｜我的股票池 V2
 
 商业层模块，不修改核心研究引擎。
-V2 的关键设计：把“已经完成的核心研究结果”保存成轻量快照，
-股票池负责展示与跟踪，不在这里重复实现财务/估值算法。
+V2：展示已完成研究的最新快照，并提供轻量价格提醒配置。
 当前仍使用 Streamlit session state；正式商业版应迁移到服务端数据库。
 """
 
@@ -12,6 +11,8 @@ import re
 from typing import Any, Dict, List
 
 import streamlit as st
+
+from valuation_alert import evaluate_alert, remove_alert, set_alert
 
 WATCHLIST_KEY = "vs_watchlist"
 SNAPSHOT_KEY = "vs_research_snapshots"
@@ -121,10 +122,56 @@ def _status(snapshot: Dict[str, Any]) -> str:
     return "⚪ 数据不足"
 
 
+def _to_float(text: Any) -> Any:
+    try:
+        value = str(text or "").strip()
+        return float(value) if value else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _render_alert_editor(code: str, snapshot: Dict[str, Any]) -> None:
+    """轻量配置：只保存用户主动设置的两个价格。"""
+    st.markdown(f"**🔔 {snapshot.get('name', code)} 提醒设置**")
+    current = st.session_state.get("vs_valuation_alerts", {}).get(code, {})
+    entry_default = current.get("entry_price")
+    heavy_default = current.get("heavy_price")
+
+    a, b = st.columns(2)
+    with a:
+        entry = st.text_input(
+            "建仓提醒价",
+            value="" if entry_default is None else str(entry_default),
+            key=f"vs_alert_entry_{code}",
+            placeholder="例如：80",
+        )
+    with b:
+        heavy = st.text_input(
+            "重仓提醒价",
+            value="" if heavy_default is None else str(heavy_default),
+            key=f"vs_alert_heavy_{code}",
+            placeholder="例如：70",
+        )
+
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("保存", key=f"vs_alert_save_{code}", use_container_width=True):
+            set_alert(code, _to_float(entry), _to_float(heavy))
+            st.success("✅ 已保存")
+            st.rerun()
+    with c2:
+        if st.button("删除", key=f"vs_alert_delete_{code}", use_container_width=True):
+            remove_alert(code)
+            st.success("✅ 已删除")
+            st.rerun()
+
+    st.caption(f"当前状态：{evaluate_alert(code, snapshot.get('price'))}")
+
+
 def render_watchlist_dashboard() -> None:
     st.markdown("---")
     st.subheader("⭐ 我的股票池 · 研究跟踪")
-    st.caption("只展示已经完成研究的最新快照；不重复执行核心估值计算。正式会员版将升级为云端持续跟踪。")
+    st.caption("展示已经完成研究的最新快照；提醒只做价格状态判断，不发送外部消息。")
 
     items = get_watchlist()
     snapshots = _snapshots()
@@ -143,10 +190,20 @@ def render_watchlist_dashboard() -> None:
                     "安全边际": _fmt_num(s.get("safety_margin"), "%"),
                     "估值": s.get("valuation_level", "未研究"),
                     "风险": s.get("risk_level", "未研究"),
+                    "提醒": evaluate_alert(code, s.get("price")),
                     "跟踪状态": _status(s) if s else "⚪ 尚未研究",
                 }
             )
         st.dataframe(rows, use_container_width=True, hide_index=True)
+
+        with st.expander("🔔 设置价格提醒", expanded=False):
+            target = st.selectbox(
+                "选择股票",
+                items,
+                format_func=lambda x: f"{snapshots.get(x, {}).get('name', x)} ({x})",
+                key="vs_alert_target",
+            )
+            _render_alert_editor(target, snapshots.get(target, {}))
 
         c1, c2 = st.columns(2)
         with c1:
@@ -154,7 +211,7 @@ def render_watchlist_dashboard() -> None:
                 clear_watchlist()
                 st.rerun()
         with c2:
-            st.caption("💡 研究任意股票后回到股票池，最新研究结果会自动更新该股票的快照。")
+            st.caption("💡 完成研究后，最新结果会自动更新该股票的快照。")
     else:
         st.info("📌 股票池还是空的。先添加你长期关注的公司，再逐只完成价值研究。")
 
