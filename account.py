@@ -1,8 +1,6 @@
-"""A股价值研投｜账号体系 V3
-
-轻量会话账号 + SQLite 用户/会员映射 + 最近研究记录。
-当前仍是原型：不保存密码、不接支付。
-正式上线前应使用托管数据库与服务端认证体系。
+"""A股价值研投｜账号体系 V4
+轻量会话账号 + SQLite 用户/会员映射 + 最近研究记录 + 会员中心入口。
+当前仍是原型：不保存密码、不接支付。正式上线前应使用托管数据库与服务端认证体系。
 """
 from __future__ import annotations
 
@@ -11,6 +9,7 @@ import streamlit as st
 
 from commercial_guard import is_pro, SESSION_PLAN_KEY
 from user_store import get_membership, recent_research, upsert_user
+from membership_center import render_membership_center
 
 ACCOUNT_KEY = "vs_account"
 
@@ -90,8 +89,11 @@ def render_account_panel() -> None:
     account = current_account()
     refresh_membership()
     plan = "专业会员" if is_pro() else "免费版"
+
     if account:
         st.caption(f"👤 {account.get('display_name', '用户')} · {account.get('email', '')} · {plan}")
+        with st.expander("⭐ 会员中心", expanded=False):
+            render_membership_center()
         with st.expander("📚 最近研究记录", expanded=False):
             _render_history(account)
         if st.button("退出账号", key="vs_account_logout"):
@@ -100,7 +102,7 @@ def render_account_panel() -> None:
         return
 
     with st.expander("👤 登录 / 创建账号", expanded=False):
-        st.caption("当前为 V3 原型：账号进入用户数据层，后续可承接研究历史与会员权益。不保存密码，不接入支付。")
+        st.caption("当前为 V4 原型：账号进入用户数据层，并可查看会员方案。不保存密码，不接入支付。")
         email = st.text_input("邮箱", placeholder="例如：you@example.com", key="vs_account_email")
         display_name = st.text_input("昵称（可选）", placeholder="例如：价值投资者", key="vs_account_name")
         if st.button("进入A股价值研投", type="primary", use_container_width=True, key="vs_account_login"):
@@ -109,3 +111,5 @@ def render_account_panel() -> None:
                 st.rerun()
             else:
                 st.error("请输入有效邮箱地址")
+        with st.expander("⭐ 查看会员方案", expanded=False):
+            render_membership_center()
