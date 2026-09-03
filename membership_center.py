@@ -1,4 +1,4 @@
-"""A股价值研投｜会员中心 V3
+"""A股价值研投｜会员中心 V4
 会员展示层：账号、权益、微信 Native 付款二维码与订单状态核验。
 """
 from __future__ import annotations
@@ -17,6 +17,7 @@ ACCOUNT_KEY = "vs_account"
 PAY_ORDER_KEY = "vs_payment_order_no"
 PAY_QR_KEY = "vs_payment_qr"
 PRO_PRICE_YUAN = 99
+_RENDER_INSTANCE = 0
 
 
 def _current_account():
@@ -32,6 +33,10 @@ def _show_qr(value: str):
 
 
 def render_membership_center() -> None:
+    global _RENDER_INSTANCE
+    _RENDER_INSTANCE += 1
+    widget_ns = f"vs_member_center_{_RENDER_INSTANCE}"
+
     account = _current_account()
     status = trial_status()
     plan = "pro" if is_pro() else "free"
@@ -71,7 +76,12 @@ def render_membership_center() -> None:
             st.markdown(f"**专业会员：¥{PRO_PRICE_YUAN}/月**")
             cfg = load_payment_config()
             if cfg.ready and account:
-                if st.button("💳 微信支付开通", type="primary", use_container_width=True, key="vs_member_pay"):
+                if st.button(
+                    "💳 微信支付开通",
+                    type="primary",
+                    use_container_width=True,
+                    key=f"{widget_ns}_pay",
+                ):
                     order = create_order(account.get("user_id", ""), "pro", PRO_PRICE_YUAN * 100)
                     if order.get("ok"):
                         st.session_state[PAY_ORDER_KEY] = order.get("order_no")
@@ -82,18 +92,23 @@ def render_membership_center() -> None:
 
                 code_url = st.session_state.get(PAY_QR_KEY)
                 order_no = st.session_state.get(PAY_ORDER_KEY)
-                if code_url:
+                if code_url and order_no:
                     _show_qr(code_url)
                     st.caption(f"订单号：{order_no}")
-                    if st.button("🔄 查询支付状态", use_container_width=True, key="vs_member_pay_check"):
+                    if st.button(
+                        "🔄 查询支付状态",
+                        use_container_width=True,
+                        key=f"{widget_ns}_pay_check",
+                    ):
                         status_result = query_order(order_no)
                         if status_result.get("paid"):
                             st.success(status_result.get("message", "支付成功，会员已开通。"))
                             st.rerun()
                         else:
                             st.info(status_result.get("message", "尚未确认支付成功。"))
+            elif not account:
+                st.info("👤 请先登录，再开通专业会员。")
             else:
-                st.button("💳 微信支付开通｜待配置", disabled=True, use_container_width=True, key="vs_member_pay_disabled")
-                st.caption("配置微信商户号、APPID、API v3 Key、商户证书与 HTTPS 回调地址后启用。")
+                st.caption("🔒 微信支付尚未配置，当前不会产生任何扣款。")
 
-    st.caption("支付采用微信官方 Native V3 下单；会员开通以微信官方订单查询结果为准。生产环境仍应增加异步回调、订单幂等、托管数据库与风控。")
+    st.caption("支付采用微信官方 Native V3 下单；会员开通以微信官方订单查询结果为准。正式生产环境仍建议增加异步回调、订单幂等、托管数据库与支付风控。")
