@@ -1,10 +1,8 @@
-"""A股价值研投｜我的股票池 V3
+"""A股价值研投｜我的股票池 V4
 
 商业层模块，不修改核心研究引擎。
-V3：研究快照 + 价格提醒 + 研究报告，并统一执行会员权限。
-当前仍使用 Streamlit session state；正式商业版应迁移到服务端数据库与账号体系。
+V4：股票池从 Streamlit 会话升级为账号绑定的 SQLite 持久化；研究快照仍保留会话展示，完整研究历史由 user_store 管理。
 """
-
 from __future__ import annotations
 
 import re
@@ -15,10 +13,17 @@ import streamlit as st
 from valuation_alert import evaluate_alert, remove_alert, set_alert
 from research_report import build_research_report
 from commercial_guard import is_pro
+from user_store import (
+    add_watchlist_stock,
+    clear_watchlist as clear_db_watchlist,
+    get_watchlist as get_db_watchlist,
+    remove_watchlist_stock,
+)
 
 WATCHLIST_KEY = "vs_watchlist"
 SNAPSHOT_KEY = "vs_research_snapshots"
 MAX_STOCKS = 20
+ACCOUNT_KEY = "vs_account"
 
 
 def _clean_code(value: Any) -> str:
@@ -26,7 +31,20 @@ def _clean_code(value: Any) -> str:
     return code if len(code) == 6 else ""
 
 
+def _user_id() -> str:
+    account = st.session_state.get(ACCOUNT_KEY)
+    if isinstance(account, dict):
+        return str(account.get("user_id", ""))
+    return ""
+
+
 def get_watchlist() -> List[str]:
+    """优先读取当前登录账号的持久化股票池；未登录时兼容旧会话数据。"""
+    user_id = _user_id()
+    if user_id:
+        items = get_db_watchlist(user_id, MAX_STOCKS)
+        st.session_state[WATCHLIST_KEY] = items
+        return items
     items = st.session_state.get(WATCHLIST_KEY, [])
     if not isinstance(items, list):
         return []
@@ -40,26 +58,33 @@ def add_stock(code: str) -> bool:
     code = _clean_code(code)
     if not code:
         return False
-    items = get_watchlist()
-    if code in items:
-        return True
-    if len(items) >= MAX_STOCKS:
+    user_id = _user_id()
+    if not user_id:
         return False
-    items.append(code)
-    st.session_state[WATCHLIST_KEY] = items
-    return True
+    ok = add_watchlist_stock(user_id, code, MAX_STOCKS)
+    if ok:
+        st.session_state[WATCHLIST_KEY] = get_db_watchlist(user_id, MAX_STOCKS)
+    return ok
 
 
 def remove_stock(code: str) -> None:
     if not is_pro():
         return
     code = _clean_code(code)
-    st.session_state[WATCHLIST_KEY] = [x for x in get_watchlist() if x != code]
+    user_id = _user_id()
+    if user_id:
+        remove_watchlist_stock(user_id, code)
+        st.session_state[WATCHLIST_KEY] = get_db_watchlist(user_id, MAX_STOCKS)
+    else:
+        st.session_state[WATCHLIST_KEY] = [x for x in get_watchlist() if x != code]
 
 
 def clear_watchlist() -> None:
     if not is_pro():
         return
+    user_id = _user_id()
+    if user_id:
+        clear_db_watchlist(user_id)
     st.session_state[WATCHLIST_KEY] = []
 
 
@@ -84,7 +109,7 @@ def record_research_snapshot(
     historical_level: str,
     risk_level: str,
 ) -> None:
-    """记录一次已成功完成核心研究的结果。"""
+    """记录一次已成功完成核心研究的最新结果。"""
     code = _clean_code(code)
     if not code:
         return
@@ -148,23 +173,11 @@ def _render_alert_editor(code: str, snapshot: Dict[str, Any]) -> None:
     current = st.session_state.get("vs_valuation_alerts", {}).get(code, {})
     entry_default = current.get("entry_price")
     heavy_default = current.get("heavy_price")
-
     a, b = st.columns(2)
     with a:
-        entry = st.text_input(
-            "建仓提醒价",
-            value="" if entry_default is None else str(entry_default),
-            key=f"vs_alert_entry_{code}",
-            placeholder="例如：80",
-        )
+        entry = st.text_input("建仓提醒价", value="" if entry_default is None else str(entry_default), key=f"vs_alert_entry_{code}", placeholder="例如：80")
     with b:
-        heavy = st.text_input(
-            "重仓提醒价",
-            value="" if heavy_default is None else str(heavy_default),
-            key=f"vs_alert_heavy_{code}",
-            placeholder="例如：70",
-        )
-
+        heavy = st.text_input("重仓提醒价", value="" if heavy_default is None else str(heavy_default), key=f"vs_alert_heavy_{code}", placeholder="例如：70")
     c1, c2 = st.columns(2)
     with c1:
         if st.button("保存", key=f"vs_alert_save_{code}", use_container_width=True):
@@ -176,7 +189,6 @@ def _render_alert_editor(code: str, snapshot: Dict[str, Any]) -> None:
             remove_alert(code)
             st.success("✅ 已删除")
             st.rerun()
-
     st.caption(f"当前状态：{evaluate_alert(code, snapshot.get('price'))}")
 
 
@@ -187,18 +199,10 @@ def render_research_report_panel(code: str, snapshot: Dict[str, Any]) -> None:
     if not is_pro():
         st.warning("🔒 专业研究报告为 Pro 功能。当前免费版可体验核心研究，升级后解锁报告导出。")
         return
-
     name = snapshot.get("name", code)
     report = build_research_report(snapshot)
     filename = f"A股价值研投_{code}_{str(name).replace('/', '_')}_研究报告.md"
-    st.download_button(
-        "📄 下载价值研究报告",
-        data=report.encode("utf-8"),
-        file_name=filename,
-        mime="text/markdown",
-        use_container_width=True,
-        key=f"vs_report_download_{code}",
-    )
+    st.download_button("📄 下载价值研究报告", data=report.encode("utf-8"), file_name=filename, mime="text/markdown", use_container_width=True, key=f"vs_report_download_{code}")
     st.caption("报告基于最近一次成功研究快照生成；适合保存、分享与后续人工复核。")
 
 
@@ -211,8 +215,11 @@ def render_watchlist_dashboard() -> None:
         st.caption("商业原则：免费版负责体验核心研究价值，Pro 负责持续跟踪与效率提升。")
         return
 
-    st.caption("展示已经完成研究的最新快照；提醒只做价格状态判断，报告用于研究整理，不发送外部消息。")
+    if not _user_id():
+        st.warning("👤 请先登录账号，再使用我的股票池。登录后股票池会自动保存，下次登录仍可继续使用。")
+        return
 
+    st.caption("股票池已绑定当前账号；展示最近研究快照。价格提醒只做状态判断，不发送外部消息。")
     items = get_watchlist()
     snapshots = _snapshots()
 
@@ -220,43 +227,31 @@ def render_watchlist_dashboard() -> None:
         rows: List[Dict[str, Any]] = []
         for code in items:
             s = snapshots.get(code, {})
-            rows.append(
-                {
-                    "股票": f"{s.get('name', code)} ({code})",
-                    "评分": _fmt_num(s.get("score")),
-                    "评级": s.get("rating", "未研究"),
-                    "当前价": _fmt_num(s.get("price")),
-                    "合理价": _fmt_num(s.get("normal_value")),
-                    "安全边际": _fmt_num(s.get("safety_margin"), "%"),
-                    "估值": s.get("valuation_level", "未研究"),
-                    "风险": s.get("risk_level", "未研究"),
-                    "提醒": evaluate_alert(code, s.get("price")),
-                    "跟踪状态": _status(s) if s else "⚪ 尚未研究",
-                }
-            )
+            rows.append({
+                "股票": f"{s.get('name', code)} ({code})",
+                "评分": _fmt_num(s.get("score")),
+                "评级": s.get("rating", "未研究"),
+                "当前价": _fmt_num(s.get("price")),
+                "合理价": _fmt_num(s.get("normal_value")),
+                "安全边际": _fmt_num(s.get("safety_margin"), "%"),
+                "估值": s.get("valuation_level", "未研究"),
+                "风险": s.get("risk_level", "未研究"),
+                "提醒": evaluate_alert(code, s.get("price")),
+                "跟踪状态": _status(s) if s else "⚪ 尚未研究",
+            })
         st.dataframe(rows, use_container_width=True, hide_index=True)
 
         with st.expander("🔔 设置价格提醒", expanded=False):
-            target = st.selectbox(
-                "选择股票",
-                items,
-                format_func=lambda x: f"{snapshots.get(x, {}).get('name', x)} ({x})",
-                key="vs_alert_target",
-            )
+            target = st.selectbox("选择股票", items, format_func=lambda x: f"{snapshots.get(x, {}).get('name', x)} ({x})", key="vs_alert_target")
             _render_alert_editor(target, snapshots.get(target, {}))
 
         with st.expander("📄 生成研究报告", expanded=False):
-            report_target = st.selectbox(
-                "选择已完成研究的股票",
-                items,
-                format_func=lambda x: f"{snapshots.get(x, {}).get('name', x)} ({x})",
-                key="vs_report_target",
-            )
+            report_target = st.selectbox("选择已完成研究的股票", items, format_func=lambda x: f"{snapshots.get(x, {}).get('name', x)} ({x})", key="vs_report_target")
             render_research_report_panel(report_target, snapshots.get(report_target, {}))
 
         c1, c2 = st.columns(2)
         with c1:
-            if st.button("清空股票池", key="vs_wl_v2_clear", use_container_width=True):
+            if st.button("清空股票池", key="vs_wl_v4_clear", use_container_width=True):
                 clear_watchlist()
                 st.rerun()
         with c2:
@@ -265,23 +260,23 @@ def render_watchlist_dashboard() -> None:
         st.info("📌 股票池还是空的。先添加你长期关注的公司，再逐只完成价值研究。")
 
     with st.expander("＋ 添加股票", expanded=False):
-        code_input = st.text_input("股票代码", placeholder="例如：000333", key="vs_wl_v2_add_code")
+        code_input = st.text_input("股票代码", placeholder="例如：000333", key="vs_wl_v4_add_code")
         a, b = st.columns(2)
         with a:
-            if st.button("加入股票池", key="vs_wl_v2_add", use_container_width=True):
+            if st.button("加入股票池", key="vs_wl_v4_add", use_container_width=True):
                 if add_stock(code_input):
-                    st.success("✅ 已加入股票池")
+                    st.success("✅ 已加入股票池并保存到账号")
                     st.rerun()
                 else:
                     st.warning(f"请输入有效6位A股代码，且股票池最多保存{MAX_STOCKS}只。")
         with b:
-            code_remove = st.text_input("移除代码", placeholder="例如：000333", key="vs_wl_v2_remove_code")
-            if st.button("移除", key="vs_wl_v2_remove", use_container_width=True):
+            code_remove = st.text_input("移除代码", placeholder="例如：000333", key="vs_wl_v4_remove_code")
+            if st.button("移除", key="vs_wl_v4_remove", use_container_width=True):
                 if code_remove in get_watchlist():
                     remove_stock(code_remove)
-                    st.success("✅ 已移除")
+                    st.success("✅ 已移除并同步账号数据")
                     st.rerun()
                 else:
                     st.info("该股票不在当前股票池。")
 
-    st.caption("🔐 当前为会话原型；正式收费版必须使用服务端账户、数据库、订单与权限校验。")
+    st.caption("🔐 V4：股票池已进入账号 + SQLite 数据层；正式生产环境仍需迁移托管数据库并接入服务端认证。")
