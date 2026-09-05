@@ -1,4 +1,4 @@
-"""A股价值研投｜用户、会员与支付订单数据层 V2
+"""A股价值研投｜用户、会员、研究与股票池数据层 V3
 
 当前 SQLite 适合原型验证；正式生产环境迁移至托管数据库。
 不保存明文密码、不保存 API v3 Key 等支付敏感密钥。
@@ -55,6 +55,16 @@ def init_db() -> None:
             );
             CREATE INDEX IF NOT EXISTS idx_research_user_time
             ON research_history(user_id, created_at DESC);
+            CREATE TABLE IF NOT EXISTS watchlist (
+                user_id TEXT NOT NULL,
+                code TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(user_id, code),
+                FOREIGN KEY(user_id) REFERENCES users(user_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_watchlist_user_time
+            ON watchlist(user_id, updated_at DESC);
             CREATE TABLE IF NOT EXISTS payment_orders (
                 order_no TEXT PRIMARY KEY,
                 user_id TEXT NOT NULL,
@@ -164,6 +174,67 @@ def recent_research(user_id: str, limit: int = 10):
             (str(user_id), safe_limit),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def get_watchlist(user_id: str, limit: int = 20):
+    """读取指定账号的股票池，按最近更新时间倒序。"""
+    if not user_id:
+        return []
+    init_db()
+    safe_limit = max(1, min(int(limit), 100))
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT code FROM watchlist WHERE user_id=? ORDER BY updated_at DESC LIMIT ?",
+            (str(user_id), safe_limit),
+        ).fetchall()
+    return [str(row["code"]) for row in rows]
+
+
+def add_watchlist_stock(user_id: str, code: str, max_stocks: int = 20) -> bool:
+    """向指定账号股票池加入股票；已存在时视为成功。"""
+    if not user_id or not code:
+        return False
+    init_db()
+    code = str(code).strip()
+    now = datetime.now(timezone.utc).isoformat()
+    with _connect() as conn:
+        exists = conn.execute(
+            "SELECT 1 FROM watchlist WHERE user_id=? AND code=?",
+            (str(user_id), code),
+        ).fetchone()
+        if exists:
+            conn.execute(
+                "UPDATE watchlist SET updated_at=? WHERE user_id=? AND code=?",
+                (now, str(user_id), code),
+            )
+            return True
+        count = conn.execute(
+            "SELECT COUNT(*) AS n FROM watchlist WHERE user_id=?",
+            (str(user_id),),
+        ).fetchone()["n"]
+        if int(count) >= int(max_stocks):
+            return False
+        conn.execute(
+            "INSERT INTO watchlist(user_id,code,created_at,updated_at) VALUES(?,?,?,?)",
+            (str(user_id), code, now, now),
+        )
+    return True
+
+
+def remove_watchlist_stock(user_id: str, code: str) -> None:
+    if not user_id or not code:
+        return
+    init_db()
+    with _connect() as conn:
+        conn.execute("DELETE FROM watchlist WHERE user_id=? AND code=?", (str(user_id), str(code).strip()))
+
+
+def clear_watchlist(user_id: str) -> None:
+    if not user_id:
+        return
+    init_db()
+    with _connect() as conn:
+        conn.execute("DELETE FROM watchlist WHERE user_id=?", (str(user_id),))
 
 
 def save_payment_order(order_no: str, user_id: str, plan: str, amount_fen: int, status: str, code_url: Optional[str] = None, prepay_id: Optional[str] = None, raw_response: Optional[Dict[str, Any]] = None) -> None:
