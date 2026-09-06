@@ -1,4 +1,4 @@
-"""A股价值研投｜会员中心 V4
+"""A股价值研投｜会员中心 V5
 会员展示层：账号、权益、微信 Native 付款二维码与订单状态核验。
 """
 from __future__ import annotations
@@ -12,6 +12,7 @@ from commercial_guard import is_pro, trial_status
 from membership import plan_catalog
 from user_store import get_membership
 from payment import create_order, load_payment_config, query_order
+from opportunity_radar import render_opportunity_radar
 
 ACCOUNT_KEY = "vs_account"
 PAY_ORDER_KEY = "vs_payment_order_no"
@@ -57,6 +58,10 @@ def render_membership_center() -> None:
     if plan == "free":
         remaining = status.get("remaining")
         st.warning(f"🎁 免费研究额度：{remaining if remaining is not None else 0} 只股票")
+
+    # V9：免费用户也能看到基于既有研究结果的投资机会雷达，不新增研究消耗。
+    if account:
+        render_opportunity_radar()
 
     cards = list(plan_catalog())
     left, right = st.columns(2)
