@@ -15,6 +15,7 @@ from payment import create_order, load_payment_config, query_order
 from opportunity_radar import render_opportunity_radar
 from research_change_tracker import render_research_change
 from valuation_change_alerts import render_valuation_change_alerts
+from investor_dashboard import render_investor_dashboard
 
 ACCOUNT_KEY = "vs_account"
 PAY_ORDER_KEY = "vs_payment_order_no"
@@ -66,6 +67,9 @@ def render_membership_center() -> None:
         st.warning(f"🎁 免费研究额度：{remaining if remaining is not None else 0} 只股票")
 
     if account:
+        # V12：个人投资驾驶舱。只读取已保存研究结果，不运行核心研究。
+        render_investor_dashboard()
+
         # V9：基于已保存研究结果的机会雷达，不重新运行核心研究。
         render_opportunity_radar()
 
