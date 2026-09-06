@@ -7,6 +7,7 @@ from typing import Any, Dict, List
 
 import streamlit as st
 
+from commercial_guard import is_pro
 from user_store import recent_research
 
 ACCOUNT_KEY = "vs_account"
@@ -85,8 +86,15 @@ def render_valuation_change_alerts() -> None:
         st.success("✅ 最近研究暂未发现明显的估值、评分或安全边际变化。")
         return
 
-    alerts.sort(key=lambda x: max(abs(x.get("value_change") or 0), abs(x.get("margin_change") or 0), abs(x.get("score_change") or 0)), reverse=True)
-    limit = 5 if st.session_state.get("vs_plan") == "pro" else 3
+    alerts.sort(
+        key=lambda x: max(
+            abs(x.get("value_change") or 0),
+            abs(x.get("margin_change") or 0),
+            abs(x.get("score_change") or 0),
+        ),
+        reverse=True,
+    )
+    limit = 5 if is_pro() else 3
     for item in alerts[:limit]:
         latest = item["latest"]
         st.warning(
