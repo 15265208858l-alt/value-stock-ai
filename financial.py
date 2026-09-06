@@ -4,6 +4,7 @@
 - 优先解析东方财富按报告期结构化字段；新浪老接口仅作备用。
 - 不访问网络；只消费主流程已经加载的 DataFrame。
 - 5年历史按年份生成，任何单一字段缺失都不影响其它字段。
+- calculate_financial_quality 保持向后兼容，避免旧版 app.py 调用方式导致 TypeError。
 """
 from __future__ import annotations
 import pandas as pd
@@ -34,6 +35,7 @@ def _find(df, names):
         if k in norm:
             return norm[k]
     return None
+
 
 DATE_COLS = ["REPORT_DATE", "日期", "报告期", "报告日期", "截止日期", "报告日", "报表日期"]
 ROE_COLS = ["ROEJQ", "ROE_YEARLY", "ROE_TTM", "加权净资产收益率(%)", "净资产收益率(%)", "加权净资产收益率", "净资产收益率", "净资产收益率(加权)"]
@@ -193,19 +195,35 @@ def process_financial_indicators(indicators, stock_code=None, profit_report=None
     return result
 
 
-def calculate_financial_quality(trend, cashflow_ratio=None):
-    """计算财务质量评分。
+def calculate_financial_quality(trend=None, cashflow_ratio=None, *args, **kwargs):
+    """计算财务质量评分（0-100）。
 
-    cashflow_ratio 允许为空：旧版调用只传入 trend 时不再因为参数缺失导致整页崩溃；
-    有现金流匹配度数据时继续使用原评分规则。
+    兼容历史版本的调用方式：
+    calculate_financial_quality(trend)
+    calculate_financial_quality(trend, cashflow_ratio)
+    以及旧代码可能传入的额外位置参数/关键字参数。
     """
+    # 兼容某些旧版本把 cashflow_ratio 作为关键字或其它名称传入的情况。
+    if cashflow_ratio is None:
+        for key in ("cash_flow_ratio", "cashflow_match", "cashflow_quality"):
+            if key in kwargs and kwargs[key] is not None:
+                cashflow_ratio = kwargs[key]
+                break
+
     score = 70
-    if trend is not None and not trend.empty:
+    if trend is not None and not getattr(trend, "empty", True):
         roe = pd.to_numeric(trend.get("ROE"), errors="coerce").dropna() if "ROE" in trend.columns else pd.Series(dtype=float)
         debt = pd.to_numeric(trend.get("资产负债率"), errors="coerce").dropna() if "资产负债率" in trend.columns else pd.Series(dtype=float)
-        if not roe.empty: score += 10 if roe.iloc[-1] >= 15 else 5 if roe.iloc[-1] >= 10 else -5
-        if not debt.empty: score += 5 if debt.iloc[-1] < 50 else -5 if debt.iloc[-1] > 70 else 0
-    if cashflow_ratio is not None: score += 10 if cashflow_ratio >= 1 else 5 if cashflow_ratio >= .7 else -10
+        if not roe.empty:
+            score += 10 if roe.iloc[-1] >= 15 else 5 if roe.iloc[-1] >= 10 else -5
+        if not debt.empty:
+            score += 5 if debt.iloc[-1] < 50 else -5 if debt.iloc[-1] > 70 else 0
+    if cashflow_ratio is not None:
+        try:
+            cfr = float(cashflow_ratio)
+            score += 10 if cfr >= 1 else 5 if cfr >= 0.7 else -10
+        except Exception:
+            pass
     score = max(0, min(100, int(score)))
     rating = "优秀" if score >= 90 else "良好" if score >= 75 else "一般" if score >= 60 else "较弱"
     return {"score": score, "rating": rating}
