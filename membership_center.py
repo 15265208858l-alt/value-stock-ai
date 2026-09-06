@@ -14,6 +14,7 @@ from user_store import get_membership, recent_research
 from payment import create_order, load_payment_config, query_order
 from opportunity_radar import render_opportunity_radar
 from research_change_tracker import render_research_change
+from valuation_change_alerts import render_valuation_change_alerts
 
 ACCOUNT_KEY = "vs_account"
 PAY_ORDER_KEY = "vs_payment_order_no"
@@ -64,15 +65,18 @@ def render_membership_center() -> None:
         remaining = status.get("remaining")
         st.warning(f"🎁 免费研究额度：{remaining if remaining is not None else 0} 只股票")
 
-    # V9：基于已保存研究结果的机会雷达，不重新运行核心研究。
     if account:
+        # V9：基于已保存研究结果的机会雷达，不重新运行核心研究。
         render_opportunity_radar()
 
-        # V10：显示最近一次研究与同股票上一次研究的变化，不消耗额度。
+        # V10：最近一次研究与同股票上一次研究的变化，不消耗额度。
         recent_rows = recent_research(account.get("user_id", ""), limit=30)
         latest_code = str(recent_rows[0].get("code") or "") if recent_rows else ""
         if latest_code:
             render_research_change(latest_code, current_snapshot=recent_rows[0])
+
+        # V11：明显的合理价值、安全边际或评分变化提醒。
+        render_valuation_change_alerts()
 
     cards = list(plan_catalog())
     left, right = st.columns(2)
