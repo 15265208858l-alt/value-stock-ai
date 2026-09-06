@@ -36,6 +36,10 @@ def _show_qr(value: str):
 
 def render_membership_center() -> None:
     global _RENDER_INSTANCE
+    # 同一次页面运行中只渲染一次会员中心。
+    # 账号面板已经提供“⭐ 会员中心”入口，避免首页再次完整展开造成移动端重复内容。
+    if _RENDER_INSTANCE >= 1:
+        return
     _RENDER_INSTANCE += 1
     widget_ns = f"vs_member_center_{_RENDER_INSTANCE}"
 
