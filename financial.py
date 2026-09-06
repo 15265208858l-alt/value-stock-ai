@@ -50,7 +50,6 @@ def _prepare(df):
     x = df.copy()
     dc = _find(x, DATE_COLS)
     if dc is None:
-        # 有些老版接口把日期放在 index。
         idx = pd.to_datetime(x.index, errors="coerce")
         if idx.notna().sum() >= max(1, len(x) // 2):
             x["_分析日期"] = idx
@@ -161,12 +160,11 @@ def process_financial_indicators(indicators, stock_code=None, profit_report=None
     latest = df.iloc[-1] if not df.empty else None
     annual = annual_df.iloc[-1] if not annual_df.empty else latest
 
-    # 对EM结构化指标，直接读取统一英文列；对新浪接口读取中文别名。
     profit_eps = _eps_series(profit_report)
     ind_eps = _eps_series(indicators)
     annual_eps = None
     if not annual_df.empty:
-        annual_eps = _get(annual, ind, EPS_COLS) if False else _get(annual, annual_df, EPS_COLS)
+        annual_eps = _get(annual, annual_df, EPS_COLS)
     if annual_eps is None and not profit_eps.empty:
         ae = profit_eps[profit_eps["_分析日期"].dt.month == 12]
         if not ae.empty:
@@ -195,7 +193,12 @@ def process_financial_indicators(indicators, stock_code=None, profit_report=None
     return result
 
 
-def calculate_financial_quality(trend, cashflow_ratio):
+def calculate_financial_quality(trend, cashflow_ratio=None):
+    """计算财务质量评分。
+
+    cashflow_ratio 允许为空：旧版调用只传入 trend 时不再因为参数缺失导致整页崩溃；
+    有现金流匹配度数据时继续使用原评分规则。
+    """
     score = 70
     if trend is not None and not trend.empty:
         roe = pd.to_numeric(trend.get("ROE"), errors="coerce").dropna() if "ROE" in trend.columns else pd.Series(dtype=float)
