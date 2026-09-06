@@ -73,7 +73,7 @@ if start:
     c.metric("数据完整度", f"{check_data_completeness(data)['score']}%")
 
     fin = process_financial_indicators(data.get("indicators"), stock_code=code)
-    fq = calculate_financial_quality(fin)
+    fq = calculate_financial_quality(fin.get("trend"), cashflow_ratio=None)
     st.header("💰 二、财务质量")
     st.write(f"财务质量评分：**{fq.get('score','暂无')}/30**")
     if fin.get("annual"):
