@@ -24,6 +24,7 @@ MAX_STOCKS=20
 ACCOUNT_KEY="vs_account"
 QUOTE_CACHE_KEY="vs_watchlist_quotes"
 QUOTE_TTL=300
+WATCHLIST_OPEN_KEY="vs_watchlist_open"
 
 
 def _clean_code(v:Any)->str:
@@ -217,10 +218,23 @@ def render_free_rank_preview():
             "结论":row.get("decision") or "暂无",
         })
     st.dataframe(pd.DataFrame(preview),use_container_width=True,hide_index=True)
-    st.info("⭐ Pro 升级后可把重点股票加入20只股票池，并获得行情跟踪、价格提醒、估值变化与研究报告。")
+    st.info("⭐ Pro 升级后可把重点股票加入20只股票池，并获得行情跟踪、价格提醒、研究报告。")
 
 
 def render_watchlist_dashboard():
+    """V10.2：默认收起股票池，点击后才展开完整跟踪面板，优化手机端首页信息密度。"""
+    if WATCHLIST_OPEN_KEY not in st.session_state:
+        st.session_state[WATCHLIST_OPEN_KEY]=False
+
+    if not st.session_state[WATCHLIST_OPEN_KEY]:
+        st.markdown("---")
+        st.markdown("### ⭐ 我的股票池 · 自动跟踪")
+        st.caption("账号已保存的重点股票、轻量行情跟踪、估值提醒与研究报告。")
+        if st.button("📂 查看我的股票池",key="vs_wl_open_v10_2",use_container_width=True):
+            st.session_state[WATCHLIST_OPEN_KEY]=True
+            st.rerun()
+        return
+
     st.markdown("---")
     st.subheader("⭐ 我的股票池 · 自动跟踪")
     if not _user_id():
@@ -274,4 +288,7 @@ def render_watchlist_dashboard():
                 if st.button("移除",key="vs_wl_v8_remove",use_container_width=True):
                     if rm in get_watchlist():remove_stock(rm);st.success("✅ 已移除");st.rerun()
                     else:st.info("该股票不在当前股票池。")
-    st.caption("🔐 V8：股票池账号持久化已完成；免费版增加最近研究智能排行，会员权限仅限制具体商业功能，不阻断页面入口。")
+    if st.button("收起股票池",key="vs_wl_close_v10_2",use_container_width=True):
+        st.session_state[WATCHLIST_OPEN_KEY]=False
+        st.rerun()
+    st.caption("🔐 V10.2：股票池账号持久化已完成；默认收起以优化移动端首页信息密度。")
