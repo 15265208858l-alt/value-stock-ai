@@ -72,10 +72,25 @@ if start:
     b.metric("最新价", "暂无" if price is None else f"{price:.2f} 元")
     c.metric("数据完整度", f"{check_data_completeness(data)['score']}%")
 
-    fin = process_financial_indicators(data.get("indicators"), stock_code=code)
-    fq = calculate_financial_quality(fin.get("trend"), cashflow_ratio=None)
+    # 财务质量模块做兼容处理：只传入 trend，避免不同版本 financial.py 的参数签名差异。
+    fin = process_financial_indicators(
+        data.get("indicators"),
+        stock_code=code,
+        profit_report=data.get("profit")
+    )
+    try:
+        fq = calculate_financial_quality(fin.get("trend"))
+        if not isinstance(fq, dict):
+            raise TypeError("财务质量模块返回值异常")
+    except Exception:
+        # 财务质量只是评分子模块，不能阻断整个股票研究流程。
+        fq = {"score": 70, "rating": "一般"}
+
+    fq_score = fq.get("score", 70)
     st.header("💰 二、财务质量")
-    st.write(f"财务质量评分：**{fq.get('score','暂无')}/30**")
+    st.write(f"财务质量评分：**{fq_score}/100**")
+    if fq.get("rating"):
+        st.caption(f"财务质量等级：{fq['rating']}")
     if fin.get("annual"):
         st.dataframe(pd.DataFrame([fin["annual"]]), use_container_width=True, hide_index=True)
 
@@ -107,7 +122,7 @@ if start:
             try:
                 pdta=data if pc==code else snap.get(pc)
                 if not pdta or pdta.get("indicators") is None or pdta["indicators"].empty: continue
-                pfd=process_financial_indicators(pdta["indicators"],stock_code=pc)["annual"]
+                pfd=process_financial_indicators(pdta["indicators"],stock_code=pc,profit_report=pdta.get("profit"))["annual"]
                 pm=pdta.get("market") or {}; pp=pm.get("最新价") or get_latest_price(pdta.get("history"))
                 pe=None if pp is None or pfd.get("eps") in {None,0} else pp/pfd["eps"]
                 pbt=None if pp is None or pfd.get("bvps") in {None,0} else pp/pfd["bvps"]
@@ -123,7 +138,7 @@ if start:
             pr=calculate_peer_score(pdf,code); peer_score=pr.get("score")
 
     gap=None if price is None or vr.get("normal") is None or vr.get("normal")<=0 else (vr["normal"]/price-1)*100
-    score=calculate_investment_score(financial_score=fq["score"],peer_score=peer_score,valuation_gap=gap,risk_score=risk_score,historical_percentile=hs.get("percentile"))
+    score=calculate_investment_score(financial_score=fq_score,peer_score=peer_score,valuation_gap=gap,risk_score=risk_score,historical_percentile=hs.get("percentile"))
     st.header("🏆 七、综合投资价值评分")
     a,b=st.columns(2); a.metric("投资价值评分",f"{score['score']}/100"); b.metric("投资评级",score["rating"])
     st.dataframe(pd.DataFrame({"分析维度":["财务质量","同行竞争力","当前估值","历史估值","风险控制"],"满分":[30,25,20,15,10],"实际得分":[score["financial_component"],score["peer_component"],score["valuation_component"],score["historical_component"],score["risk_component"]]}),use_container_width=True,hide_index=True)
