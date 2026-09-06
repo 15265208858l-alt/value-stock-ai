@@ -51,6 +51,57 @@ def refresh_membership() -> None:
 def logout() -> None:
     st.session_state.pop(ACCOUNT_KEY, None)
     st.session_state[SESSION_PLAN_KEY] = "free"
+    st.session_state.pop("vs_force_full_watchlist", None)
+
+
+def _patch_mobile_watchlist() -> None:
+    """首页移动端先展示轻量入口；研究完成后仍保留完整股票池能力。
+
+    该补丁在 app.py 导入 watchlist_v2 之前执行，不修改核心研究引擎。
+    """
+    try:
+        import watchlist_v2
+        if getattr(watchlist_v2, "_VS_MOBILE_WATCHLIST_PATCHED", False):
+            return
+        original = watchlist_v2.render_watchlist_dashboard
+
+        def mobile_aware_watchlist():
+            snapshots = st.session_state.get("vs_research_snapshots", {})
+            force_full = bool(st.session_state.get("vs_force_full_watchlist", False))
+            if snapshots or force_full:
+                original()
+                if force_full:
+                    if st.button("收起股票池", key="vs_watchlist_collapse", use_container_width=True):
+                        st.session_state["vs_force_full_watchlist"] = False
+                        st.rerun()
+                return
+
+            exp = st.expander(
+                "⭐ 我的股票池 · 自动跟踪",
+                expanded=False,
+                key="vs_home_watchlist_compact",
+                icon="⭐",
+                type="compact",
+                on_change="rerun",
+            )
+            if exp.open:
+                with exp:
+                    st.caption("手机端已优化：首页默认只保留入口，不主动展开长列表。")
+                    if not current_account():
+                        st.info("👤 登录后可使用个人股票池。")
+                    elif is_pro():
+                        st.success("⭐ 专业会员可管理最多20只重点股票。")
+                    else:
+                        st.info("🔒 免费版可先完成股票研究；升级 Pro 后可使用20只股票池、行情跟踪和价格提醒。")
+                    if st.button("📂 查看完整股票池", key="vs_watchlist_open_full", type="primary", use_container_width=True):
+                        st.session_state["vs_force_full_watchlist"] = True
+                        st.rerun()
+
+        watchlist_v2.render_watchlist_dashboard = mobile_aware_watchlist
+        watchlist_v2._VS_MOBILE_WATCHLIST_PATCHED = True
+    except Exception:
+        # 商业展示层失败不能影响主研究页面。
+        return
 
 
 def _render_history(account) -> None:
@@ -86,6 +137,7 @@ def _render_history(account) -> None:
 
 
 def render_account_panel() -> None:
+    _patch_mobile_watchlist()
     account = current_account()
     refresh_membership()
     plan = "专业会员" if is_pro() else "免费版"
