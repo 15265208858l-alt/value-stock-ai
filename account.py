@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import re
+import sys
 import streamlit as st
 
 from commercial_guard import is_pro, SESSION_PLAN_KEY
@@ -55,10 +56,7 @@ def logout() -> None:
 
 
 def _patch_mobile_watchlist() -> None:
-    """首页移动端先展示轻量入口；研究完成后仍保留完整股票池能力。
-
-    该补丁在 app.py 导入 watchlist_v2 之前执行，不修改核心研究引擎。
-    """
+    """首页移动端先展示轻量入口；研究完成后仍保留完整股票池能力。"""
     try:
         import watchlist_v2
         if getattr(watchlist_v2, "_VS_MOBILE_WATCHLIST_PATCHED", False):
@@ -99,6 +97,11 @@ def _patch_mobile_watchlist() -> None:
 
         watchlist_v2.render_watchlist_dashboard = mobile_aware_watchlist
         watchlist_v2._VS_MOBILE_WATCHLIST_PATCHED = True
+        # app.py 使用 from watchlist_v2 import render_watchlist_dashboard，
+        # 因此同步替换主脚本命名空间中的函数引用。
+        main_module = sys.modules.get("__main__")
+        if main_module is not None and hasattr(main_module, "render_watchlist_dashboard"):
+            main_module.render_watchlist_dashboard = mobile_aware_watchlist
     except Exception:
         # 商业展示层失败不能影响主研究页面。
         return
