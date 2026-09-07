@@ -253,6 +253,7 @@ st.header("🏆 十、综合投资价值评分")
 gap=None if price is None or vr["normal"] is None or vr["normal"]<=0 else (vr["normal"]/price-1)*100
 score=calculate_investment_score(financial_score=fq["score"],peer_score=peer_score,valuation_gap=gap,risk_score=risk_score,historical_percentile=hs.get("percentile"))
 a,b=st.columns(2); a.metric("投资价值评分",f"{score['score']}/100"); b.metric("投资评级",score["rating"])
+st.caption(f"研究可信度：{score.get('data_confidence','暂无')}｜数据模块：{score.get('data_available_count',0)}/5｜数据闸门：{score.get('data_gate','暂无')}｜研究状态：{score.get('research_status','暂无')}")
 st.dataframe(pd.DataFrame({"分析维度":["财务质量","同行竞争力","当前估值","历史估值","风险控制"],"满分":[30,25,20,15,10],"实际得分":[score["financial_component"],score["peer_component"],score["valuation_component"],score["historical_component"],score["risk_component"]]}),use_container_width=True,hide_index=True)
 st.write(f"当前估值判断：**{score['valuation_level']}**"); st.write(f"历史估值判断：**{score['historical_level']}**"); st.write(f"风险判断：**{score['risk_level']}**")
 if score.get("relative_valuation_available"): st.write(f"同行相对估值：**{score['relative_valuation_level']}**｜同行PE中位数 {score.get('peer_median_pe','暂无')}倍｜目标PE/同行中位 {score.get('relative_pe_ratio','暂无')}")
@@ -271,7 +272,7 @@ if account:
 
 st.markdown('<div class="vs-explain"><b>🎯 核心研究结论</b></div>',unsafe_allow_html=True)
 a,b,c,d=st.columns(4); a.metric("综合评分",f"{score['score']}/100"); b.metric("中性合理价","暂无" if vr.get("normal") is None else f"{vr['normal']:.2f} 元"); c.metric("当前价格","暂无" if price is None else f"{price:.2f} 元"); d.metric("安全边际","暂无" if gap is None else f"{gap:+.1f}%")
-st.markdown(f'<div class="vs-company">{name} <span class="vs-badge">{score["rating"]}</span></div><div class="vs-explain">最终建议：<b>{decision["decision"]}</b>｜操作：{decision["action"]}｜仓位：{decision["position"]}<br>估值：{score["valuation_level"]}｜历史估值：{score["historical_level"]}｜风险：{score["risk_level"]}</div>',unsafe_allow_html=True)
+st.markdown(f'<div class="vs-company">{name} <span class="vs-badge">{score["rating"]}</span></div><div class="vs-explain">最终建议：<b>{decision["decision"]}</b>｜操作：{decision["action"]}｜仓位：{decision["position"]}<br>估值：{score["valuation_level"]}｜历史估值：{score["historical_level"]}｜风险：{score["risk_level"]}<br>研究可信度：{score.get("data_confidence","暂无")}｜状态：{score.get("research_status","暂无")}</div>',unsafe_allow_html=True)
 
 normal_text="暂无" if vr.get("normal") is None else f"{vr['normal']:.2f} 元"
 price_text="暂无" if price is None else f"{price:.2f} 元"
