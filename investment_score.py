@@ -1,4 +1,10 @@
-"""ValueStock AI 投资价值综合评分模块 V2.2"""
+"""ValueStock AI 投资价值综合评分模块 V3.0
+
+核心原则：
+- 评分必须区分“真实得分”和“数据可信度”，缺失数据不能伪装成高质量研究结果。
+- 保留原有接口，兼容主程序；在此基础上增加数据完整性闸门。
+- 估值、财务质量、历史估值、风险、同行比较共同决定最终评级。
+"""
 
 from peer_compare import get_last_relative_valuation, reset_relative_valuation
 
@@ -49,9 +55,33 @@ def score_risk(risk_score):
     return {"score": 0, "level": "高风险", "available": True}
 
 
+def _confidence_gate(raw_score, available_count):
+    """数据闸门：防止核心模块缺失时仍出现A/B级高置信结论。"""
+    if available_count >= 5:
+        return raw_score, "高"
+    if available_count >= 3:
+        return min(raw_score, 79), "中"
+    return min(raw_score, 59), "低"
+
+
+def _research_status(total_score, confidence, valuation_level, risk_level):
+    if risk_level == "高风险":
+        return "风险否决"
+    if confidence == "低":
+        return "数据不足"
+    if total_score >= 85:
+        return "核心候选"
+    if total_score >= 75:
+        return "优质候选"
+    if total_score >= 65:
+        return "重点跟踪"
+    if valuation_level in {"明显低估", "较低估值"} and total_score >= 60:
+        return "估值机会"
+    return "观察"
+
+
 def calculate_investment_score(financial_score, peer_score, valuation_gap, risk_score, historical_percentile=None):
     if peer_score is None:
-        # 防止Streamlit连续运行不同股票时沿用上一只股票的同行相对估值
         reset_relative_valuation()
 
     financial_available = financial_score is not None
@@ -73,16 +103,29 @@ def calculate_investment_score(financial_score, peer_score, valuation_gap, risk_
     else:
         combined_valuation = current_result["score"]
 
-    total_score = round(max(0, min(100, financial_component + peer_component + combined_valuation + historical_result["score"] + risk_result["score"])))
+    raw_score = max(
+        0,
+        min(
+            100,
+            financial_component
+            + peer_component
+            + combined_valuation
+            + historical_result["score"]
+            + risk_result["score"],
+        ),
+    )
 
-    available_count = sum([
-        financial_available,
-        peer_available,
-        current_result["available"],
-        historical_result["available"],
-        risk_result["available"],
-    ])
-    confidence = "高" if available_count >= 5 else "中" if available_count >= 3 else "低"
+    available_count = sum(
+        [
+            financial_available,
+            peer_available,
+            current_result["available"],
+            historical_result["available"],
+            risk_result["available"],
+        ]
+    )
+
+    total_score, confidence = _confidence_gate(round(raw_score), available_count)
 
     if total_score >= 85:
         rating = "A：优质公司 + 估值有吸引力"
@@ -95,9 +138,13 @@ def calculate_investment_score(financial_score, peer_score, valuation_gap, risk_
     else:
         rating = "E：风险较高"
 
+    status = _research_status(total_score, confidence, current_result["level"], risk_result["level"])
+
     return {
         "score": total_score,
+        "raw_score": round(raw_score),
         "rating": rating,
+        "research_status": status,
         "financial_component": round(financial_component, 1),
         "peer_component": round(peer_component, 1),
         "peer_raw_score": peer_score,
@@ -118,4 +165,5 @@ def calculate_investment_score(financial_score, peer_score, valuation_gap, risk_
         "risk_level": risk_result["level"],
         "data_available_count": available_count,
         "data_confidence": confidence,
+        "data_gate": "通过" if available_count >= 3 else "未通过",
     }
