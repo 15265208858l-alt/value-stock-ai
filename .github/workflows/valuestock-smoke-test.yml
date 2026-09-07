@@ -61,3 +61,17 @@ jobs:
           assert "research_status" in result
           print("core scoring smoke test passed:", result["score"], result["rating"])
           PY
+      - name: Runtime smoke test free cash flow
+        run: |
+          python - <<'PY'
+          from fcf_analysis import build_fcf_analysis
+          good = build_fcf_analysis(120, 100, 30, 25)
+          assert good["available"] is True
+          assert good["fcf"] == 90
+          assert good["hard_veto"] is False
+
+          veto = build_fcf_analysis(-20, 30, 10, 8)
+          assert veto["hard_veto"] is True
+          assert "利润现金含量异常" in " ".join(veto["items"])
+          print("fcf smoke test passed:", good["level"], veto["level"])
+          PY
