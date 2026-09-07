@@ -1,9 +1,10 @@
-"""ValueStock AI 财务分析 V22
+"""ValueStock AI 财务分析 V23
 
 核心原则：
 - 优先解析东方财富按报告期结构化字段；新浪老接口仅作备用。
 - 不访问网络；只消费主流程已经加载的 DataFrame。
 - 5年历史按年份生成，任何单一字段缺失都不影响其它字段。
+- 财务质量评分同时考虑 ROE、成长、负债、现金流和稳定性。
 """
 from __future__ import annotations
 import pandas as pd
@@ -35,6 +36,7 @@ def _find(df, names):
             return norm[k]
     return None
 
+
 DATE_COLS = ["REPORT_DATE", "日期", "报告期", "报告日期", "截止日期", "报告日", "报表日期"]
 ROE_COLS = ["ROEJQ", "ROE_YEARLY", "ROE_TTM", "加权净资产收益率(%)", "净资产收益率(%)", "加权净资产收益率", "净资产收益率", "净资产收益率(加权)"]
 REV_GROWTH_COLS = ["TOTALOPERATEREVETZ", "TOTAL_OPERATE_REVENUE_TZ", "营业总收入同比增长", "主营业务收入增长率(%)", "主营业务收入增长率", "营业收入增长率(%)", "营业收入增长率", "营收增长率", "总营业收入同比增长"]
@@ -50,7 +52,6 @@ def _prepare(df):
     x = df.copy()
     dc = _find(x, DATE_COLS)
     if dc is None:
-        # 有些老版接口把日期放在 index。
         idx = pd.to_datetime(x.index, errors="coerce")
         if idx.notna().sum() >= max(1, len(x) // 2):
             x["_分析日期"] = idx
@@ -127,6 +128,7 @@ def _build_trend(indicators, profit_report=None):
     years = sorted(years)[-5:]
     if not years:
         return pd.DataFrame(columns=["报告期", "ROE", "营收增长率", "净利润增长率", "资产负债率", "BPS", "EPS"])
+
     ind_map = {int(r["_年份"]): r for _, r in ind.iterrows()} if not ind.empty else {}
     fb = fallback.copy()
     if not fb.empty:
@@ -154,19 +156,53 @@ def _build_trend(indicators, profit_report=None):
     return pd.DataFrame(rows)
 
 
+def _trend_quality(trend):
+    """从5年趋势中提取稳定性特征，返回可解释的辅助指标。"""
+    out = {
+        "roe_avg": None,
+        "roe_positive_years": 0,
+        "revenue_positive_years": 0,
+        "profit_positive_years": 0,
+        "roe_stability": None,
+        "growth_stability": None,
+    }
+    if trend is None or trend.empty:
+        return out
+
+    for key, col in (
+        ("roe_avg", "ROE"),
+        ("_revenue", "营收增长率"),
+        ("_profit", "净利润增长率"),
+    ):
+        if col in trend.columns:
+            s = pd.to_numeric(trend[col], errors="coerce").dropna()
+            if not s.empty:
+                if key == "roe_avg":
+                    out["roe_avg"] = float(s.mean())
+                    out["roe_positive_years"] = int((s > 0).sum())
+                    if len(s) >= 3:
+                        out["roe_stability"] = float(s.std(ddof=0))
+                elif key == "_revenue":
+                    out["revenue_positive_years"] = int((s > 0).sum())
+                    if len(s) >= 3:
+                        out["growth_stability"] = float(s.std(ddof=0))
+                elif key == "_profit":
+                    out["profit_positive_years"] = int((s > 0).sum())
+    return out
+
+
 def process_financial_indicators(indicators, stock_code=None, profit_report=None):
-    result = {"latest": {}, "annual": {}, "trend": pd.DataFrame()}
+    result = {"latest": {}, "annual": {}, "trend": pd.DataFrame(), "quality_meta": {}}
     df = _prepare(indicators)
     annual_df = _annual_rows(indicators)
     latest = df.iloc[-1] if not df.empty else None
     annual = annual_df.iloc[-1] if not annual_df.empty else latest
 
-    # 对EM结构化指标，直接读取统一英文列；对新浪接口读取中文别名。
     profit_eps = _eps_series(profit_report)
     ind_eps = _eps_series(indicators)
     annual_eps = None
     if not annual_df.empty:
-        annual_eps = _get(annual, ind, EPS_COLS) if False else _get(annual, annual_df, EPS_COLS)
+        annual_eps = _get(annual, annual_df, EPS_COLS)
     if annual_eps is None and not profit_eps.empty:
         ae = profit_eps[profit_eps["_分析日期"].dt.month == 12]
         if not ae.empty:
@@ -192,17 +228,49 @@ def process_financial_indicators(indicators, stock_code=None, profit_report=None
             "bvps": _get(annual, annual_df, BPS_COLS),
         }
     result["trend"] = _build_trend(indicators, profit_report)
+    result["quality_meta"] = _trend_quality(result["trend"])
     return result
 
 
 def calculate_financial_quality(trend, cashflow_ratio):
-    score = 70
+    """财务质量评分0~100：强调长期ROE、成长稳定、现金流和杠杆。"""
+    score = 60.0
+    meta = _trend_quality(trend)
+
     if trend is not None and not trend.empty:
         roe = pd.to_numeric(trend.get("ROE"), errors="coerce").dropna() if "ROE" in trend.columns else pd.Series(dtype=float)
         debt = pd.to_numeric(trend.get("资产负债率"), errors="coerce").dropna() if "资产负债率" in trend.columns else pd.Series(dtype=float)
-        if not roe.empty: score += 10 if roe.iloc[-1] >= 15 else 5 if roe.iloc[-1] >= 10 else -5
-        if not debt.empty: score += 5 if debt.iloc[-1] < 50 else -5 if debt.iloc[-1] > 70 else 0
-    if cashflow_ratio is not None: score += 10 if cashflow_ratio >= 1 else 5 if cashflow_ratio >= .7 else -10
-    score = max(0, min(100, int(score)))
+        rev = pd.to_numeric(trend.get("营收增长率"), errors="coerce").dropna() if "营收增长率" in trend.columns else pd.Series(dtype=float)
+        profit = pd.to_numeric(trend.get("净利润增长率"), errors="coerce").dropna() if "净利润增长率" in trend.columns else pd.Series(dtype=float)
+
+        if not roe.empty:
+            last = float(roe.iloc[-1])
+            avg = float(roe.mean())
+            score += 12 if last >= 15 else 8 if last >= 10 else 2 if last >= 5 else -6
+            if avg >= 15:
+                score += 6
+            elif avg >= 10:
+                score += 3
+            elif avg < 5:
+                score -= 4
+            if len(roe) >= 3 and float(roe.std(ddof=0)) <= 5:
+                score += 3
+
+        if not debt.empty:
+            d = float(debt.iloc[-1])
+            score += 5 if d < 50 else 2 if d < 60 else -2 if d < 70 else -7
+
+        if not rev.empty:
+            pos = int((rev > 0).sum())
+            score += 3 if pos >= max(3, len(rev) - 1) else 1 if pos >= len(rev) / 2 else -3
+
+        if not profit.empty:
+            pos = int((profit > 0).sum())
+            score += 4 if pos >= max(3, len(profit) - 1) else 1 if pos >= len(profit) / 2 else -4
+
+    if cashflow_ratio is not None:
+        score += 10 if cashflow_ratio >= 1.2 else 7 if cashflow_ratio >= 1.0 else 4 if cashflow_ratio >= .7 else -5
+
+    score = max(0, min(100, int(round(score))))
     rating = "优秀" if score >= 90 else "良好" if score >= 75 else "一般" if score >= 60 else "较弱"
-    return {"score": score, "rating": rating}
+    return {"score": score, "rating": rating, "trend_meta": meta}
