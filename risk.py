@@ -1,10 +1,11 @@
 """
-ValueStock AI 财务深度风险分析 V2
+ValueStock AI 财务深度风险分析 V2.1
 
 核心原则：
 - 保留原有 API，避免主程序回归。
 - 在现金流、应收、存货、ROE、负债之外，增加趋势异常与硬风险否决。
 - 对缺失字段明确标记“数据不足”，不把未知当成安全。
+- 对外统一输出0~10风险分，避免前端出现超过10分的显示。
 """
 from __future__ import annotations
 
@@ -58,16 +59,6 @@ def _latest(df, candidates):
     if s is None or s.empty:
         return None
     return safe_float(s.iloc[-1])
-
-
-def _growth(series):
-    if series is None or len(series) < 2:
-        return None
-    first = float(series.iloc[0])
-    last = float(series.iloc[-1])
-    if first == 0:
-        return None
-    return last / first - 1
 
 
 def analyze_cashflow_quality(operating_cashflow, net_profit):
@@ -127,13 +118,7 @@ def analyze_debt_ratio(debt_ratio):
 
 def analyze_trend_risk(profit_report=None, balance=None, cashflow=None):
     """尝试识别应收/存货/商誉/资本开支的深度风险。字段缺失时返回数据不足，不强行判断。"""
-    meta = {
-        "available": False,
-        "score": 0,
-        "hard_veto": False,
-        "items": [],
-        "metrics": {}
-    }
+    meta = {"available": False, "score": 0, "hard_veto": False, "items": [], "metrics": {}}
 
     revenue = _series(profit_report, ["营业总收入", "营业收入", "TOTALOPERATEREVE", "营业总收入(元)"])
     receivable = _series(balance, ["应收账款", "应收账款净额", "ACCOUNTS_RECE", "应收账款(元)"])
@@ -211,40 +196,19 @@ def analyze_trend_risk(profit_report=None, balance=None, cashflow=None):
 
     if meta["score"] >= 5:
         meta["hard_veto"] = True
-
     return meta
 
 
-def analyze_financial_risk(
-    operating_cashflow,
-    net_profit,
-    receivable,
-    revenue,
-    inventory,
-    roe,
-    debt_ratio,
-    **kwargs
-):
+def analyze_financial_risk(operating_cashflow, net_profit, receivable, revenue, inventory, roe, debt_ratio, **kwargs):
     cashflow_result = analyze_cashflow_quality(operating_cashflow, net_profit)
     receivable_result = analyze_receivable(receivable, revenue)
     inventory_result = analyze_inventory(inventory, revenue)
     roe_result = analyze_roe(roe)
     debt_result = analyze_debt_ratio(debt_ratio)
+    deep = analyze_trend_risk(profit_report=kwargs.get("profit_report"), balance=kwargs.get("balance"), cashflow=kwargs.get("cashflow"))
 
-    deep = analyze_trend_risk(
-        profit_report=kwargs.get("profit_report"),
-        balance=kwargs.get("balance"),
-        cashflow=kwargs.get("cashflow"),
-    )
-
-    total_score = (
-        cashflow_result["score"]
-        + receivable_result["score"]
-        + inventory_result["score"]
-        + roe_result["score"]
-        + debt_result["score"]
-        + deep["score"]
-    )
+    raw_score = cashflow_result["score"] + receivable_result["score"] + inventory_result["score"] + roe_result["score"] + debt_result["score"] + deep["score"]
+    risk_score = min(10, raw_score)
 
     hard_veto = bool(deep.get("hard_veto"))
     if cashflow_result["score"] >= 3 and safe_float(net_profit) is not None and safe_float(net_profit) > 0:
@@ -252,13 +216,13 @@ def analyze_financial_risk(
 
     if hard_veto:
         level = "高风险 / 否决"
-    elif total_score == 0:
+    elif risk_score == 0:
         level = "低风险"
-    elif total_score <= 3:
+    elif risk_score <= 3:
         level = "风险较低"
-    elif total_score <= 6:
+    elif risk_score <= 6:
         level = "需要关注"
-    elif total_score <= 9:
+    elif risk_score <= 8:
         level = "风险较高"
     else:
         level = "高风险"
@@ -268,9 +232,12 @@ def analyze_financial_risk(
         if result["score"] > 0:
             risk_items.append(result["message"])
     risk_items.extend(deep.get("items", []))
+    if hard_veto:
+        risk_items.insert(0, "⛔ 触发风险否决规则：当前公司不应仅因估值便直接进入建仓。")
 
     return {
-        "score": total_score,
+        "score": risk_score,
+        "raw_score": raw_score,
         "level": level,
         "hard_veto": hard_veto,
         "cashflow": cashflow_result,
