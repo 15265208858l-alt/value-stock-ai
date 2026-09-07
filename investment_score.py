@@ -1,19 +1,6 @@
-"""ValueStock AI 投资价值综合评分模块 V4.0
+"""ValueStock AI 投资价值综合评分模块 V4.1
 
-设计目标：把长期价值投资的核心逻辑真正落到评分里，同时保持 V3.0 主程序接口兼容。
-
-评分框架（100分）：
-- 企业质量 25：财务质量、ROE、盈利能力
-- 成长质量 15：营收/利润增长及稳定性
-- 现金流质量 15：经营现金流与利润匹配度
-- 资产负债表 10：负债率及财务安全
-- 营运资本质量 10：应收/存货相对收入的压力
-- 当前估值 10：合理价值安全边际
-- 历史估值 5：当前估值处于历史什么位置
-- 同行竞争力 5：相对行业位置
-- 盈利兑现质量 5：正常化盈利的可信度
-
-风险不再简单“加分减分”，而是增加硬闸门：高风险直接否决，数据不足限制最高评级。
+在V4.0基础上修复同行数据可用性变量遗留问题。
 """
 
 from peer_compare import get_last_relative_valuation, reset_relative_valuation
@@ -23,8 +10,7 @@ def _num(v):
     try:
         if v is None:
             return None
-        x = float(v)
-        return x
+        return float(v)
     except Exception:
         return None
 
@@ -83,7 +69,6 @@ def score_risk(risk_score):
 
 
 def _score_enterprise_quality(financial_score, roe=None):
-    # financial_score 本身为 0~100，再压缩到 25 分。
     base = 15.0 if financial_score is None else _clamp(float(financial_score) * 0.25, 0, 25)
     available = financial_score is not None
     if roe is not None:
@@ -199,10 +184,6 @@ def calculate_investment_score(
     historical_percentile=None,
     **kwargs,
 ):
-    """计算长期价值投资综合评分。
-
-    保留旧版五参数接口；额外指标通过 kwargs 传入，不会破坏旧调用。
-    """
     if peer_score is None:
         reset_relative_valuation()
 
@@ -232,10 +213,7 @@ def calculate_investment_score(
     if relative_available:
         peer_points = _clamp(float(peer_score) * 0.05, 0, 5)
 
-    # 估值维度 = 当前估值 10 + 历史估值 5。
     valuation_points = current_result["score"] + historical_result["score"]
-
-    # 风险不进入正常“奖励项”，而是用风险折扣 + 否决逻辑控制最终分数。
     risk_discount = 0 if risk_score is None else (0 if risk_score <= 3 else 1.5 if risk_score <= 6 else 4.0 if risk_score <= 9 else 10.0)
 
     raw_score = _clamp(
@@ -252,7 +230,7 @@ def calculate_investment_score(
         working_capital_available,
         current_result["available"],
         historical_result["available"],
-        peer_available,
+        relative_available,
         earnings_available,
     ])
 
