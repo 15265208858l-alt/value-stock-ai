@@ -1,11 +1,11 @@
-"""ValueStock AI fast data layer V24：并发、缓存、结构化财务主链路。"""
+"""ValueStock AI fast data layer V25：并发、缓存、结构化财务主链路 + 股票池轻量行情。"""
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
 import time
 import pandas as pd
 import akshare as ak
 
-_STOCK_CACHE={}; _PEER_CACHE={}
-STOCK_TTL=300; PEER_TTL=600; FETCH_TIMEOUT=18
+_STOCK_CACHE={}; _PEER_CACHE={}; _WATCH_QUOTE_CACHE={}
+STOCK_TTL=300; PEER_TTL=600; WATCH_QUOTE_TTL=120; FETCH_TIMEOUT=18
 
 def clean_stock_code(code):
     s=str(code or "").strip(); return s if len(s)==6 and s.isdigit() else ""
@@ -18,7 +18,6 @@ def _safe_call(fn):
     except Exception: return None
 
 def _market_symbol(code):
-    # 当前 AKShare stock_financial_analysis_indicator_em 使用 000001.SZ / 600519.SH 口径。
     return code + (".SH" if code.startswith(("6","68")) else ".SZ" if code.startswith(("0","3")) else ".BJ")
 
 def _market_prefix(code): return "sh" if code.startswith(("6","68")) else "sz" if code.startswith(("0","3")) else "bj"
@@ -108,3 +107,20 @@ def load_peer_snapshots(codes_tuple):
             code,h,ind=v; out[code]={"history":h,"indicators":ind,"market":_market(code,h)}
         except Exception: pass
     _PEER_CACHE[key]=(now,out); return out
+
+def load_watchlist_quotes(codes_tuple):
+    """股票池专用轻量行情：只请求历史行情，不触发财务/估值主链路。"""
+    codes=tuple(sorted(set(clean_stock_code(c) for c in (codes_tuple or ()) if clean_stock_code(c))))
+    if not codes: return {}
+    key=",".join(codes); now=time.time(); cached=_WATCH_QUOTE_CACHE.get(key)
+    if cached and now-cached[0]<WATCH_QUOTE_TTL: return cached[1]
+    tasks={f"w{i}":(lambda c=c: (c,_history(c))) for i,c in enumerate(codes)}
+    raw=_run_tasks(tasks,workers=min(8,max(1,len(codes))),timeout=12)
+    out={}
+    for value in raw.values():
+        try:
+            code,hist=value
+            if _valid_df(hist): out[code]=_market(code,hist)
+        except Exception: pass
+    _WATCH_QUOTE_CACHE[key]=(now,out)
+    return out
