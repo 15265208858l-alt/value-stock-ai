@@ -5,6 +5,7 @@ from fast_data import clean_stock_code, load_stock_data_fast, load_peer_snapshot
 from financial import process_financial_indicators, calculate_financial_quality
 from risk import analyze_financial_risk
 from fcf_analysis import analyze_fcf_from_frames, fcf_quality_label
+from governance_analysis import analyze_governance
 from valuation import calculate_valuation_scenarios, calculate_eps_cagr, build_growth_sensitivity
 from adaptive_valuation import detect_valuation_model, get_valuation_config
 from earnings_basis import build_earnings_basis
@@ -157,6 +158,17 @@ d.metric("现金流质量",fcf_quality_label(fcf))
 for x in fcf.get("items",[]):
     if x not in risk.get("risk_items",[]): st.caption(f"💡 {x}")
 
+st.header("🏛️ 五.5、公司治理与股东结构")
+governance=analyze_governance(balance=data.get("balance"),shareholders=data.get("shareholders"),related_party=data.get("related_party"))
+ga,gb,gc=st.columns(3)
+ga.metric("治理数据状态", "可分析" if governance.get("available") else "数据不足")
+gb.metric("治理风险", governance.get("level", "数据不足"))
+gc.metric("治理风险分", f"{governance.get('score',0)}/4")
+for x in governance.get("items",[]):
+    st.warning(f"⚠️ {x}")
+if not governance.get("available"):
+    st.caption("ℹ️ 当前数据链暂未稳定提供股东/关联交易结构化字段，系统不会用猜测代替事实。")
+
 st.header("📈 六、5年财务质量")
 fq=calculate_financial_quality(trend,cash_ratio)
 a,b=st.columns(2); a.metric("财务质量评分",f"{fq['score']}/100"); b.metric("财务质量评级",fq["rating"])
@@ -263,11 +275,11 @@ if len(peer_codes)>=2:
 
 st.header("🏆 十、综合投资价值评分")
 gap=None if price is None or vr["normal"] is None or vr["normal"]<=0 else (vr["normal"]/price-1)*100
-score=calculate_investment_score(financial_score=fq["score"],peer_score=peer_score,valuation_gap=gap,risk_score=risk_score,historical_percentile=hs.get("percentile"),roe=latest.get("roe") if latest.get("roe") is not None else annual_roe,revenue_growth=latest.get("revenue_growth"),profit_growth=latest.get("profit_growth"),cashflow_ratio=cash_ratio,debt_ratio=latest.get("debt") if latest.get("debt") is not None else annual_debt,receivable_to_revenue=None if rv["revenue"] in {None,0} else (rv["receivable"]/rv["revenue"] if rv["receivable"] is not None else None),inventory_to_revenue=None if rv["revenue"] in {None,0} else (rv["inventory"]/rv["revenue"] if rv["inventory"] is not None else None),realization_score=earn.get("realization_score"))
+score=calculate_investment_score(financial_score=fq["score"],peer_score=peer_score,valuation_gap=gap,risk_score=risk_score,historical_percentile=hs.get("percentile"),roe=latest.get("roe") if latest.get("roe") is not None else annual_roe,revenue_growth=latest.get("revenue_growth"),profit_growth=latest.get("profit_growth"),cashflow_ratio=cash_ratio,debt_ratio=latest.get("debt") if latest.get("debt") is not None else annual_debt,receivable_to_revenue=None if rv["revenue"] in {None,0} else (rv["receivable"]/rv["revenue"] if rv["receivable"] is not None else None),inventory_to_revenue=None if rv["revenue"] in {None,0} else (rv["inventory"]/rv["revenue"] if rv["inventory"] is not None else None),realization_score=earn.get("realization_score"),governance_score=governance.get("score"))
 a,b=st.columns(2); a.metric("投资价值评分",f"{score['score']}/100"); b.metric("投资评级",score["rating"])
 st.caption(f"研究可信度：{score.get('data_confidence','暂无')}｜数据模块：{score.get('data_available_count',0)}/9｜数据闸门：{score.get('data_gate','暂无')}｜研究状态：{score.get('research_status','暂无')}")
 st.dataframe(pd.DataFrame({"分析维度":["财务质量","成长质量","现金流质量","资产负债","营运资本","当前估值","历史估值","同行竞争力","盈利兑现"],"满分":[25,15,15,10,10,10,5,5,5],"实际得分":[score["financial_component"],score["growth_component"],score["cashflow_component"],score["balance_component"],score["working_capital_component"],score["absolute_valuation_component"],score["historical_component"],score["peer_component"],score["earnings_realization_component"]]}).round(1),use_container_width=True,hide_index=True)
-st.write(f"当前估值判断：**{score['valuation_level']}**"); st.write(f"历史估值判断：**{score['historical_level']}**"); st.write(f"风险判断：**{score['risk_level']}**")
+st.write(f"当前估值判断：**{score['valuation_level']}**"); st.write(f"历史估值判断：**{score['historical_level']}**"); st.write(f"风险判断：**{score['risk_level']}**"); st.write(f"公司治理判断：**{governance.get('level','数据不足')}**")
 if score.get("relative_valuation_available"): st.write(f"同行相对估值：**{score['relative_valuation_level']}**｜同行PE中位数 {score.get('peer_median_pe','暂无')}倍｜目标PE/同行中位 {score.get('relative_pe_ratio','暂无')}")
 
 st.header("🎯 十一、最终投资决策")
@@ -285,16 +297,17 @@ if account:
 
 st.markdown('<div class="vs-explain"><b>🎯 核心研究结论</b></div>',unsafe_allow_html=True)
 a,b,c,d=st.columns(4); a.metric("综合评分",f"{score['score']}/100"); b.metric("中性合理价","暂无" if vr.get("normal") is None else f"{vr['normal']:.2f} 元"); c.metric("当前价格","暂无" if price is None else f"{price:.2f} 元"); d.metric("安全边际","暂无" if gap is None else f"{gap:+.1f}%")
-st.markdown(f'<div class="vs-company">{name} <span class="vs-badge">{score["rating"]}</span></div><div class="vs-explain">最终建议：<b>{decision["decision"]}</b>｜操作：{decision["action"]}｜仓位：{decision["position"]}<br>估值：{score["valuation_level"]}｜历史估值：{score["historical_level"]}｜风险：{decision_risk_level}<br>研究可信度：{score.get("data_confidence","暂无")}｜状态：{score.get("research_status","暂无")}</div>',unsafe_allow_html=True)
+st.markdown(f'<div class="vs-company">{name} <span class="vs-badge">{score["rating"]}</span></div><div class="vs-explain">最终建议：<b>{decision["decision"]}</b>｜操作：{decision["action"]}｜仓位：{decision["position"]}<br>估值：{score["valuation_level"]}｜历史估值：{score["historical_level"]}｜风险：{decision_risk_level}｜治理：{governance.get("level","数据不足")}<br>研究可信度：{score.get("data_confidence","暂无")}｜状态：{score.get("research_status","暂无")}</div>',unsafe_allow_html=True)
 
 normal_text="暂无" if vr.get("normal") is None else f"{vr['normal']:.2f} 元"
 price_text="暂无" if price is None else f"{price:.2f} 元"
 gap_text="暂无" if gap is None else f"{gap:+.1f}%"
 result_class="vs-result-good" if score["score"]>=75 else "vs-result-mid" if score["score"]>=60 else "vs-result-bad"
-result_slot.markdown(f'<div class="vs-result {result_class}"><div class="vs-result-title">🎯 {name} · 核心研究结论</div><div class="vs-result-main">{decision["decision"]} · {decision["action"]}</div><div class="vs-result-sub">综合评分 {score["score"]}/100　｜　当前价格 {price_text}　｜　中性合理价 {normal_text}　｜　安全边际 {gap_text}</div><div class="vs-result-sub">估值：{score["valuation_level"]}　｜　历史估值：{score["historical_level"]}　｜　风险：{decision_risk_level}　｜　建议仓位：{decision["position"]}</div></div>',unsafe_allow_html=True)
+result_slot.markdown(f'<div class="vs-result {result_class}"><div class="vs-result-title">🎯 {name} · 核心研究结论</div><div class="vs-result-main">{decision["decision"]} · {decision["action"]}</div><div class="vs-result-sub">综合评分 {score["score"]}/100　｜　当前价格 {price_text}　｜　中性合理价 {normal_text}　｜　安全边际 {gap_text}</div><div class="vs-result-sub">估值：{score["valuation_level"]}　｜　历史估值：{score["historical_level"]}　｜　风险：{decision_risk_level}　｜　治理：{governance.get('level','数据不足')}　｜　建议仓位：{decision["position"]}</div></div>',unsafe_allow_html=True)
 
 st.header("🏆 十二、最终投资结论")
 if risk_hard_veto: conclusion="🔴 触发财务风险否决：即使估值有吸引力，也应优先解决现金流/资产质量问题。"
+elif governance.get("hard_veto"): conclusion="🔴 触发公司治理风险否决：建议在关键治理风险澄清前保持谨慎。"
 elif score["score"]>=85: conclusion="🟢 公司质量与估值较匹配，值得重点研究。"
 elif score["score"]>=75: conclusion="🟢 公司质量较好，值得长期跟踪。"
 elif score["score"]>=65: conclusion="🟡 公司具备一定价值，建议等待更好的安全边际。"
@@ -308,5 +321,5 @@ if risk.get("risk_items"):
 render_watchlist_dashboard()
 
 st.header("🛠️ 十三、系统诊断")
-st.dataframe(pd.DataFrame({"模块":["fast_data.py","financial.py","risk.py","fcf_analysis.py","valuation.py","adaptive_valuation.py","earnings_basis.py","growth_quality.py","historical_valuation.py","peer_compare.py","industry.py","investment_score.py","investment_decision.py"],"状态":["✅","✅","✅","✅" if fcf.get("available") else "⏳","✅","✅","✅" if earn.get("valuation_eps") is not None else "⏳","✅" if gq is not None else "⏳","✅" if hist is not None and not hist.empty else "⏳","✅" if peer_score is not None else "⏳","✅" if peer_codes else "⏳","✅","✅"]}),use_container_width=True,hide_index=True)
-st.divider(); st.caption("A股价值研投｜ValueStock AI：正常化EPS + 盈利兑现 + 成长质量 + 自由现金流 + 历史估值 + 同行比较 + 安全边际 + 风险否决 + 综合投资决策")
+st.dataframe(pd.DataFrame({"模块":["fast_data.py","financial.py","risk.py","fcf_analysis.py","governance_analysis.py","valuation.py","adaptive_valuation.py","earnings_basis.py","growth_quality.py","historical_valuation.py","peer_compare.py","industry.py","investment_score.py","investment_decision.py"],"状态":["✅","✅","✅","✅" if fcf.get("available") else "⏳","✅" if governance.get("available") else "⏳","✅","✅","✅" if earn.get("valuation_eps") is not None else "⏳","✅" if gq is not None else "⏳","✅" if hist is not None and not hist.empty else "⏳","✅" if peer_score is not None else "⏳","✅" if peer_codes else "⏳","✅","✅"]}),use_container_width=True,hide_index=True)
+st.divider(); st.caption("A股价值研投｜ValueStock AI：正常化EPS + 盈利兑现 + 成长质量 + 自由现金流 + 历史估值 + 同行比较 + 安全边际 + 风险否决 + 公司治理 + 综合投资决策")
