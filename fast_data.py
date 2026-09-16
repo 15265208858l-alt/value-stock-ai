@@ -1,4 +1,4 @@
-"""ValueStock AI fast data layer V25：并发、缓存、结构化财务主链路 + 股票池轻量行情。"""
+"""ValueStock AI fast data layer V26：并发、缓存、结构化财务主链路 + 股东治理数据。"""
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
 import time
 import pandas as pd
@@ -17,8 +17,7 @@ def _safe_call(fn):
         x=fn(); return x if _valid_df(x) else None
     except Exception: return None
 
-def _market_symbol(code):
-    return code + (".SH" if code.startswith(("6","68")) else ".SZ" if code.startswith(("0","3")) else ".BJ")
+def _market_symbol(code): return code + (".SH" if code.startswith(("6","68")) else ".SZ" if code.startswith(("0","3")) else ".BJ")
 
 def _market_prefix(code): return "sh" if code.startswith(("6","68")) else "sz" if code.startswith(("0","3")) else "bj"
 
@@ -42,6 +41,25 @@ def _report(code,typ):
                 y=x.copy(); y["_sort_date"]=pd.to_datetime(y[dc],errors="coerce"); y=y.sort_values("_sort_date",ascending=False).drop(columns=["_sort_date"]).reset_index(drop=True); return y
     except Exception: pass
     return x
+
+def _shareholders(code):
+    """主要股东/十大股东：用于治理分析；优先新浪主要股东，失败回退东方财富十大股东。"""
+    x=_safe_call(lambda: ak.stock_main_stock_holder(stock=code))
+    if x is None:
+        symbol=_market_prefix(code)+code
+        x=_safe_call(lambda: ak.stock_gdfx_top_10_em(symbol=symbol))
+    if x is None: return None
+    try:
+        date_col=next((c for c in ["截至日期","报告日期","报告期","日期"] if c in x.columns),None)
+        if date_col is not None:
+            y=x.copy(); y["_sort_date"]=pd.to_datetime(y[date_col],errors="coerce")
+            latest=y["_sort_date"].max()
+            if pd.notna(latest):
+                y=y[y["_sort_date"]==latest].copy()
+            return y.drop(columns=["_sort_date"],errors="ignore").reset_index(drop=True)
+    except Exception:
+        pass
+    return x.reset_index(drop=True)
 
 def _market(code,hist):
     name=code
@@ -79,8 +97,8 @@ def load_stock_data_fast(code):
     if not code: return None
     now=time.time(); cached=_STOCK_CACHE.get(code)
     if cached and now-cached[0]<STOCK_TTL: return cached[1]
-    tasks={"history":lambda:_history(code),"indicators":lambda:_indicators(code),"profit":lambda:_report(code,"利润表"),"balance":lambda:_report(code,"资产负债表"),"cashflow":lambda:_report(code,"现金流量表")}
-    out={"code":code,**_run_tasks(tasks,workers=5)}; out["market"]=_market(code,out["history"]); _STOCK_CACHE[code]=(now,out); return out
+    tasks={"history":lambda:_history(code),"indicators":lambda:_indicators(code),"profit":lambda:_report(code,"利润表"),"balance":lambda:_report(code,"资产负债表"),"cashflow":lambda:_report(code,"现金流量表"),"shareholders":lambda:_shareholders(code)}
+    out={"code":code,**_run_tasks(tasks,workers=6)}; out["market"]=_market(code,out["history"]); return_cached=out; _STOCK_CACHE[code]=(now,return_cached); return out
 
 def get_latest_price(history):
     if not _valid_df(history): return None
@@ -91,9 +109,9 @@ def get_latest_price(history):
     return None
 
 def check_data_completeness(data):
-    if not data: return {"score":0,"available":0,"total":7,"level":"无数据"}
-    market=data.get("market") or {}; checks=[market.get("最新价") is not None,_valid_df(data.get("history")),_valid_df(data.get("indicators")),_valid_df(data.get("profit")),_valid_df(data.get("balance")),_valid_df(data.get("cashflow")),bool(data.get("code"))]; n=sum(checks); score=round(n/7*100)
-    return {"score":score,"available":n,"total":7,"level":"优秀" if score>=90 else "良好" if score>=75 else "一般" if score>=60 else "较弱"}
+    if not data: return {"score":0,"available":0,"total":8,"level":"无数据"}
+    market=data.get("market") or {}; checks=[market.get("最新价") is not None,_valid_df(data.get("history")),_valid_df(data.get("indicators")),_valid_df(data.get("profit")),_valid_df(data.get("balance")),_valid_df(data.get("cashflow")),_valid_df(data.get("shareholders")),bool(data.get("code"))]; n=sum(checks); score=round(n/8*100)
+    return {"score":score,"available":n,"total":8,"level":"优秀" if score>=90 else "良好" if score>=75 else "一般" if score>=60 else "较弱"}
 
 def load_peer_snapshots(codes_tuple):
     codes=tuple(sorted(set(codes_tuple or ())))
