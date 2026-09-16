@@ -1,13 +1,12 @@
-"""A股价值研投｜用户、会员、研究与股票池数据层 V4"""
+"""A股价值研投｜用户、会员、研究、股票池、提醒数据层 V5"""
 from __future__ import annotations
 import hashlib,json,os,sqlite3
 from datetime import datetime,timedelta,timezone
-from typing import Any,Dict,Optional
 DB_PATH=os.getenv("VALUESTOCK_DB_PATH","valuestock.db")
 def _connect():
-    c=sqlite3.connect(DB_PATH,timeout=10); c.row_factory=sqlite3.Row; return c
+    c=sqlite3.connect(DB_PATH,timeout=10);c.row_factory=sqlite3.Row;return c
 def init_db():
-    with _connect() as c:c.executescript('''CREATE TABLE IF NOT EXISTS users(user_id TEXT PRIMARY KEY,email TEXT NOT NULL UNIQUE,display_name TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);CREATE TABLE IF NOT EXISTS memberships(user_id TEXT PRIMARY KEY,plan TEXT NOT NULL DEFAULT 'free',status TEXT NOT NULL DEFAULT 'active',expires_at TEXT,updated_at TEXT NOT NULL,FOREIGN KEY(user_id) REFERENCES users(user_id));CREATE TABLE IF NOT EXISTS research_history(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id TEXT NOT NULL,code TEXT NOT NULL,name TEXT,score REAL,decision TEXT,price REAL,normal_value REAL,safety_margin REAL,created_at TEXT NOT NULL,FOREIGN KEY(user_id) REFERENCES users(user_id));CREATE INDEX IF NOT EXISTS idx_research_user_time ON research_history(user_id,created_at DESC);CREATE TABLE IF NOT EXISTS watchlist(user_id TEXT NOT NULL,code TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(user_id,code),FOREIGN KEY(user_id) REFERENCES users(user_id));CREATE INDEX IF NOT EXISTS idx_watchlist_user_time ON watchlist(user_id,updated_at DESC);CREATE TABLE IF NOT EXISTS payment_orders(order_no TEXT PRIMARY KEY,user_id TEXT NOT NULL,plan TEXT NOT NULL,amount_fen INTEGER NOT NULL,status TEXT NOT NULL,code_url TEXT,prepay_id TEXT,transaction_id TEXT,raw_response TEXT,created_at TEXT NOT NULL,paid_at TEXT,FOREIGN KEY(user_id) REFERENCES users(user_id));CREATE INDEX IF NOT EXISTS idx_payment_user_time ON payment_orders(user_id,created_at DESC);''')
+    with _connect() as c:c.executescript('''CREATE TABLE IF NOT EXISTS users(user_id TEXT PRIMARY KEY,email TEXT NOT NULL UNIQUE,display_name TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);CREATE TABLE IF NOT EXISTS memberships(user_id TEXT PRIMARY KEY,plan TEXT NOT NULL DEFAULT 'free',status TEXT NOT NULL DEFAULT 'active',expires_at TEXT,updated_at TEXT NOT NULL,FOREIGN KEY(user_id) REFERENCES users(user_id));CREATE TABLE IF NOT EXISTS research_history(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id TEXT NOT NULL,code TEXT NOT NULL,name TEXT,score REAL,decision TEXT,price REAL,normal_value REAL,safety_margin REAL,created_at TEXT NOT NULL,FOREIGN KEY(user_id) REFERENCES users(user_id));CREATE INDEX IF NOT EXISTS idx_research_user_time ON research_history(user_id,created_at DESC);CREATE TABLE IF NOT EXISTS watchlist(user_id TEXT NOT NULL,code TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(user_id,code),FOREIGN KEY(user_id) REFERENCES users(user_id));CREATE INDEX IF NOT EXISTS idx_watchlist_user_time ON watchlist(user_id,updated_at DESC);CREATE TABLE IF NOT EXISTS valuation_alerts(user_id TEXT NOT NULL,code TEXT NOT NULL,entry_price REAL,heavy_price REAL,updated_at TEXT NOT NULL,PRIMARY KEY(user_id,code),FOREIGN KEY(user_id) REFERENCES users(user_id));CREATE INDEX IF NOT EXISTS idx_alert_user_time ON valuation_alerts(user_id,updated_at DESC);CREATE TABLE IF NOT EXISTS payment_orders(order_no TEXT PRIMARY KEY,user_id TEXT NOT NULL,plan TEXT NOT NULL,amount_fen INTEGER NOT NULL,status TEXT NOT NULL,code_url TEXT,prepay_id TEXT,transaction_id TEXT,raw_response TEXT,created_at TEXT NOT NULL,paid_at TEXT,FOREIGN KEY(user_id) REFERENCES users(user_id));CREATE INDEX IF NOT EXISTS idx_payment_user_time ON payment_orders(user_id,created_at DESC);''')
 def make_user_id(email):return 'u_'+hashlib.sha256(str(email or '').strip().lower().encode()).hexdigest()[:24]
 def upsert_user(email,display_name=''):
     init_db();email=str(email or '').strip().lower();uid=make_user_id(email);name=str(display_name or email.split('@')[0]).strip() or email.split('@')[0];now=datetime.now(timezone.utc).isoformat()
@@ -34,14 +33,12 @@ def recent_research(uid,limit=10):
     with _connect() as c:r=c.execute('SELECT code,name,score,decision,price,normal_value,safety_margin,created_at FROM research_history WHERE user_id=? ORDER BY created_at DESC LIMIT ?',(str(uid),limit)).fetchall()
     return [dict(x) for x in r]
 def latest_research_for_codes(uid,codes):
-    """返回每只股票最近一次研究结果，用于股票池快速恢复，不重新跑核心研究。"""
-    init_db(); codes=[str(x) for x in (codes or []) if str(x)]
+    init_db();codes=[str(x) for x in (codes or []) if str(x)]
     if not uid or not codes:return {}
-    marks=','.join('?'*len(codes)); params=[str(uid),*codes]
-    with _connect() as c:r=c.execute(f'''SELECT code,name,score,decision,price,normal_value,safety_margin,created_at FROM research_history WHERE user_id=? AND code IN ({marks}) ORDER BY created_at DESC''',params).fetchall()
+    marks=','.join('?'*len(codes))
+    with _connect() as c:r=c.execute(f'SELECT code,name,score,decision,price,normal_value,safety_margin,created_at FROM research_history WHERE user_id=? AND code IN ({marks}) ORDER BY created_at DESC',[str(uid),*codes]).fetchall()
     out={}
-    for x in r:
-        d=dict(x);out.setdefault(str(d['code']),d)
+    for x in r:out.setdefault(str(x['code']),dict(x))
     return out
 def get_watchlist(uid,limit=20):
     if not uid:return []
@@ -64,6 +61,24 @@ def clear_watchlist(uid):
     if not uid:return
     init_db()
     with _connect() as c:c.execute('DELETE FROM watchlist WHERE user_id=?',(str(uid),))
+def get_valuation_alert(uid,code):
+    if not uid or not code:return {}
+    init_db()
+    with _connect() as c:r=c.execute('SELECT entry_price,heavy_price,updated_at FROM valuation_alerts WHERE user_id=? AND code=?',(str(uid),str(code).strip())).fetchone()
+    return dict(r) if r else {}
+def get_valuation_alerts(uid):
+    if not uid:return {}
+    init_db()
+    with _connect() as c:r=c.execute('SELECT code,entry_price,heavy_price,updated_at FROM valuation_alerts WHERE user_id=? ORDER BY updated_at DESC',(str(uid),)).fetchall()
+    return {str(x['code']):dict(x) for x in r}
+def save_valuation_alert(uid,code,entry_price,heavy_price):
+    if not uid or not code:return
+    init_db();now=datetime.now(timezone.utc).isoformat()
+    with _connect() as c:c.execute('INSERT INTO valuation_alerts(user_id,code,entry_price,heavy_price,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(user_id,code) DO UPDATE SET entry_price=excluded.entry_price,heavy_price=excluded.heavy_price,updated_at=excluded.updated_at',(str(uid),str(code).strip(),entry_price,heavy_price,now))
+def delete_valuation_alert(uid,code):
+    if not uid or not code:return
+    init_db()
+    with _connect() as c:c.execute('DELETE FROM valuation_alerts WHERE user_id=? AND code=?',(str(uid),str(code).strip()))
 def save_payment_order(order_no,user_id,plan,amount_fen,status,code_url=None,prepay_id=None,raw_response=None):
     init_db();now=datetime.now(timezone.utc).isoformat()
     with _connect() as c:c.execute('INSERT INTO payment_orders(order_no,user_id,plan,amount_fen,status,code_url,prepay_id,raw_response,created_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(order_no) DO UPDATE SET status=excluded.status,code_url=excluded.code_url,prepay_id=excluded.prepay_id,raw_response=excluded.raw_response',(str(order_no),str(user_id),str(plan),int(amount_fen),str(status),code_url,prepay_id,json.dumps(raw_response or {},ensure_ascii=False),now))
