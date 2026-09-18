@@ -33,14 +33,61 @@ def _indicators(code):
     return _safe_call(lambda: ak.stock_financial_analysis_indicator(symbol=code))
 
 def _report(code,typ):
-    x=_safe_call(lambda: ak.stock_financial_report_sina(stock=_market_prefix(code)+code,symbol=typ))
-    if x is None: return None
+    """三大报表多路兼容：优先新浪，失败回退东方财富。"""
+    prefix = _market_prefix(code)
+    candidates = [
+        lambda: ak.stock_financial_report_sina(
+            stock=prefix + code, symbol=typ
+        ),
+    ]
+
+    # 东方财富：不同 AkShare 版本参数略有差异，逐路尝试；
+    # _safe_call 会把接口异常安全降级为 None。
+    if typ == "利润表":
+        candidates += [
+            lambda: ak.stock_profit_sheet_by_report_em(symbol=code),
+            lambda: ak.stock_profit_sheet_by_report_em(stock_code=code),
+        ]
+    elif typ == "资产负债表":
+        candidates += [
+            lambda: ak.stock_balance_sheet_by_report_em(symbol=code),
+            lambda: ak.stock_balance_sheet_by_report_em(stock_code=code),
+        ]
+    elif typ == "现金流量表":
+        candidates += [
+            lambda: ak.stock_cash_flow_sheet_by_report_em(symbol=code),
+            lambda: ak.stock_cash_flow_sheet_by_report_em(stock_code=code),
+        ]
+
+    x = None
+    for fn in candidates:
+        x = _safe_call(fn)
+        if x is not None:
+            break
+
+    if x is None:
+        return None
+
     try:
-        for dc in ["报告日期","报告期","截止日期","REPORT_DATE","日期"]:
+        for dc in [
+            "报告日期", "报告期", "截止日期", "REPORT_DATE",
+            "日期", "REPORT_DATE"
+        ]:
             if dc in x.columns:
-                y=x.copy(); y["_sort_date"]=pd.to_datetime(y[dc],errors="coerce"); y=y.sort_values("_sort_date",ascending=False).drop(columns=["_sort_date"]).reset_index(drop=True); return y
-    except Exception: pass
-    return x
+                y = x.copy()
+                y["_sort_date"] = pd.to_datetime(
+                    y[dc], errors="coerce"
+                )
+                y = (
+                    y.sort_values("_sort_date", ascending=False)
+                    .drop(columns=["_sort_date"])
+                    .reset_index(drop=True)
+                )
+                return y
+    except Exception:
+        pass
+
+    return x.reset_index(drop=True)
 
 def _shareholders(code):
     """主要股东/十大股东：多接口兼容，统一只返回最新一期。"""
