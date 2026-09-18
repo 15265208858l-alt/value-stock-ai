@@ -164,6 +164,13 @@ ga,gb,gc=st.columns(3)
 ga.metric("治理数据状态", "可分析" if governance.get("available") else "数据不足")
 gb.metric("治理风险", governance.get("level", "数据不足"))
 gc.metric("治理风险分", f"{governance.get('score',0)}/4")
+gm=governance.get("metrics") or {}
+if governance.get("available"):
+    st.caption(
+        f"第一大股东持股：{('%.2f%%' % gm['top1_holder_pct']) if gm.get('top1_holder_pct') is not None else '暂无'}"
+        f" ｜ 前十大股东合计：{('%.2f%%' % gm['top10_holder_pct']) if gm.get('top10_holder_pct') is not None else '暂无'}"
+        f" ｜ 第一大股东：{gm.get('top1_holder_name','暂无')}"
+    )
 for x in governance.get("items",[]):
     st.warning(f"⚠️ {x}")
 if not governance.get("available"):
