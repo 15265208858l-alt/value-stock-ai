@@ -163,7 +163,7 @@ governance=analyze_governance(balance=data.get("balance"),shareholders=data.get(
 ga,gb,gc=st.columns(3)
 ga.metric("治理数据状态", "可分析" if governance.get("available") else "数据不足")
 gb.metric("治理风险", governance.get("level", "数据不足"))
-gc.metric("治理风险分", f"{governance.get('score',0)}/4")
+gc.metric("治理风险分", f"{governance.get('score')}/4" if governance.get("available") else "—")
 gm=governance.get("metrics") or {}
 if governance.get("available"):
     st.caption(
