@@ -209,6 +209,9 @@ def build_value_investment_10_steps(
         )
     )
 
+    capex_to_ocf = (fcf_result or {}).get("capex_to_ocf")
+    capex_text = "暂无" if capex_to_ocf is None else f"{capex_to_ocf * 100:.1f}%"
+
     step_rows = [
         {
             "步骤": "1. 行业与成长空间",
@@ -282,8 +285,7 @@ def build_value_investment_10_steps(
                 )
             ),
             "核心证据": (
-                f"资本开支/经营现金流："
-                f"{'暂无' if (fcf_result or {}).get('capex_to_ocf') is None else f'{fcf_result.get("capex_to_ocf") * 100:.1f}%'}；"
+                f"资本开支/经营现金流：{capex_text}；"
                 f"自由现金流：{money_text((fcf_result or {}).get('fcf'))}；"
                 "商誉及重大减值历史仍需结合资产负债表/公告进一步核查"
             ),
