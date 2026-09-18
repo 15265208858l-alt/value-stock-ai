@@ -84,6 +84,7 @@ def build_value_investment_10_steps(
     current_price,
     normal_value,
     score,
+    goodwill,
 ):
     rows = []
 
@@ -210,7 +211,9 @@ def build_value_investment_10_steps(
     )
 
     capex_to_ocf = (fcf_result or {}).get("capex_to_ocf")
+    capex_to_dep = (fcf_result or {}).get("capex_to_depreciation")
     capex_text = "暂无" if capex_to_ocf is None else f"{capex_to_ocf * 100:.1f}%"
+    capex_dep_text = "暂无" if capex_to_dep is None else f"{capex_to_dep:.2f}x"
 
     step_rows = [
         {
@@ -286,8 +289,10 @@ def build_value_investment_10_steps(
             ),
             "核心证据": (
                 f"资本开支/经营现金流：{capex_text}；"
+                f"资本开支/折旧：{capex_dep_text}；"
                 f"自由现金流：{money_text((fcf_result or {}).get('fcf'))}；"
-                "商誉及重大减值历史仍需结合资产负债表/公告进一步核查"
+                f"商誉：{money_text(goodwill)}；"
+                "重大减值历史仍需结合历年年报与公告进一步核查"
             ),
             "证据性质": "现金流事实 + 专项核查"
         },
@@ -402,6 +407,7 @@ def report_values(data):
 
 st.header("💰 四、三大报表")
 rv=report_values(data)
+goodwill=lastv(data.get("balance"),["商誉","GOODWILL"])
 a,b,c,d,e=st.columns(5)
 a.metric("营业收入",money(rv["revenue"])); b.metric("净利润",money(rv["net_profit"])); c.metric("经营现金流",money(rv["ocf"])); d.metric("应收账款",money(rv["receivable"])); e.metric("存货",money(rv["inventory"]))
 
@@ -576,6 +582,7 @@ step_table=build_value_investment_10_steps(
     current_price=price,
     normal_value=vr.get("normal"),
     score=score,
+    goodwill=goodwill,
 )
 st.dataframe(step_table,use_container_width=True,hide_index=True)
 st.caption("说明：十步分析严格区分财务事实、量化代理指标与需人工核查事项；第2步护城河、第9步治理、第8步商誉/减值不能仅凭单一财务指标自动下结论。")
