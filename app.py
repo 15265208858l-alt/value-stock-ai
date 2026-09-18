@@ -575,7 +575,8 @@ if v19_trend is not None and not v19_trend.empty:
     st.subheader("📉 5年核心质量趋势")
     chart_cols=[x for x in ["应收/营收","存货/营收","商誉/总资产","资本开支/经营现金流"] if x in v19_trend.columns]
     if chart_cols:
-        trend_display=v19_trend[["年份"]+chart_cols].copy().set_index("年份") * 100
+        trend_display=v19_trend[["年份"]+chart_cols].copy().set_index("年份")
+        trend_display=trend_display.apply(pd.to_numeric, errors="coerce") * 100
         trend_display.columns=[f"{x}（%）" for x in chart_cols]
         st.line_chart(trend_display)
     st.caption("趋势图使用已加载年报/现金流数据；相关比率用于趋势观察，不单独构成投资结论。")
@@ -733,7 +734,7 @@ for title, text_value in research_report:
     st.write(text_value)
 st.caption("V19说明：报告把已实现数据、模型规则与可能原因分开；原因段是研究线索，不是对公司经营事实的断言。")
 
-st.header("🎯 十一、最终投资决策")
+st.header("🎯 十三、最终投资决策")
 decision_risk_level="高风险" if (risk_hard_veto or fcf_hard_veto) else score["risk_level"]
 decision=make_investment_decision(investment_score=score["score"],valuation_level=score["valuation_level"],historical_level=score["historical_level"],risk_level=decision_risk_level)
 a,b,c=st.columns(3); a.metric("投资决策",decision["decision"]); b.metric("建议操作",decision["action"]); c.metric("建议仓位",decision["position"]); st.info("💡 决策理由："+decision["reason"])
