@@ -402,6 +402,124 @@ def lastv(df,names):
 
 def money(v): return "暂无" if v is None else f"{v/1e8:.2f} 亿元"
 
+def annual_value_frame(df, candidates):
+    if df is None or getattr(df, "empty", True):
+        return pd.DataFrame(columns=["年份", "数值"])
+    x = df.copy()
+    date_col = next((name for name in ["REPORT_DATE", "日期", "报告期", "报告日期", "截止日期", "报表日期"] if name in x.columns), None)
+    dates = pd.to_datetime(x.index, errors="coerce") if date_col is None else pd.to_datetime(x[date_col], errors="coerce")
+    x["_分析日期"] = dates
+    x = x.dropna(subset=["_分析日期"]).copy()
+    if x.empty:
+        return pd.DataFrame(columns=["年份", "数值"])
+    value_col = col(x, candidates)
+    if value_col is None:
+        return pd.DataFrame(columns=["年份", "数值"])
+    x["_年份"] = x["_分析日期"].dt.year
+    annual = x[x["_分析日期"].dt.month == 12].copy()
+    base = annual if not annual.empty else x
+    base = base.sort_values("_分析日期").groupby("_年份", as_index=False).tail(1)
+    base["数值"] = base[value_col].apply(sf)
+    return base[["年份", "数值"]].dropna(subset=["数值"]).sort_values("年份").reset_index(drop=True)
+
+def build_v19_financial_trend(data):
+    profit = data.get("profit")
+    balance = data.get("balance")
+    cashflow = data.get("cashflow")
+    revenue = annual_value_frame(profit, ["营业总收入", "营业收入", "TOTALOPERATEREVE", "主营业务收入"]).rename(columns={"数值":"营业收入"})
+    net_profit = annual_value_frame(profit, ["归属于母公司所有者的净利润", "归属于母公司股东的净利润", "净利润", "PARENTNETPROFIT"]).rename(columns={"数值":"净利润"})
+    ocf = annual_value_frame(cashflow, ["经营活动产生的现金流量净额", "经营活动现金流量净额", "NETCASH_OPERATE"]).rename(columns={"数值":"经营现金流"})
+    capex = annual_value_frame(cashflow, ["购建固定资产、无形资产和其他长期资产所支付的现金", "购建固定资产、无形资产和其他长期资产支付的现金", "CAPEX", "资本开支"]).rename(columns={"数值":"资本开支"})
+    goodwill = annual_value_frame(balance, ["商誉", "GOODWILL", "商誉净额"]).rename(columns={"数值":"商誉"})
+    receivable = annual_value_frame(balance, ["应收账款", "应收账款净额", "ACCOUNTS_RECE"]).rename(columns={"数值":"应收账款"})
+    inventory = annual_value_frame(balance, ["存货", "存货净额", "INVENTORY"]).rename(columns={"数值":"存货"})
+    total_assets = annual_value_frame(balance, ["资产总计", "TOTAL_ASSETS", "总资产"]).rename(columns={"数值":"总资产"})
+    frames = [revenue, net_profit, ocf, capex, goodwill, receivable, inventory, total_assets]
+    out = None
+    for frame in frames:
+        out = frame if out is None else out.merge(frame, on="年份", how="outer")
+    if out is None or out.empty:
+        return pd.DataFrame()
+    for name in ["资本开支", "商誉", "应收账款", "存货"]:
+        if name in out.columns:
+            out[name] = out[name].abs()
+    if "经营现金流" in out.columns and "资本开支" in out.columns:
+        out["自由现金流"] = out["经营现金流"] - out["资本开支"]
+        out["资本开支/经营现金流"] = out.apply(lambda row: row["资本开支"] / abs(row["经营现金流"]) if pd.notna(row["资本开支"]) and pd.notna(row["经营现金流"]) and abs(row["经营现金流"]) > 0 else None, axis=1)
+    if "应收账款" in out.columns and "营业收入" in out.columns:
+        out["应收/营收"] = out["应收账款"] / out["营业收入"].replace(0, pd.NA)
+    if "存货" in out.columns and "营业收入" in out.columns:
+        out["存货/营收"] = out["存货"] / out["营业收入"].replace(0, pd.NA)
+    if "商誉" in out.columns and "总资产" in out.columns:
+        out["商誉/总资产"] = out["商誉"] / out["总资产"].replace(0, pd.NA)
+    return out.sort_values("年份").tail(6).reset_index(drop=True)
+
+def build_v19_research_report(trend_df, latest, annual_roe, annual_debt, fcf, governance, vr, score):
+    sections = []
+    def num(v):
+        try:
+            return None if v is None else float(v)
+        except Exception:
+            return None
+    t = trend_df if trend_df is not None and not trend_df.empty else pd.DataFrame()
+    revenue_growth = num(latest.get("revenue_growth"))
+    profit_growth = num(latest.get("profit_growth"))
+    roe = num(latest.get("roe")) if latest.get("roe") is not None else num(annual_roe)
+    debt = num(latest.get("debt")) if latest.get("debt") is not None else num(annual_debt)
+    trend_fact = "历史样本不足，暂不能形成趋势结论。"
+    if len(t) >= 2:
+        pieces = []
+        if "营业收入" in t.columns:
+            s = pd.to_numeric(t["营业收入"], errors="coerce").dropna()
+            if len(s) >= 2 and s.iloc[0] > 0: pieces.append("营业收入由%.1f亿元变为%.1f亿元" % (float(s.iloc[0])/1e8, float(s.iloc[-1])/1e8))
+        if "净利润" in t.columns:
+            s = pd.to_numeric(t["净利润"], errors="coerce").dropna()
+            if len(s) >= 2: pieces.append("净利润最新为%.1f亿元" % (float(s.iloc[-1])/1e8))
+        if "经营现金流" in t.columns:
+            s = pd.to_numeric(t["经营现金流"], errors="coerce").dropna()
+            if len(s) >= 2: pieces.append("经营现金流最新为%.1f亿元" % (float(s.iloc[-1])/1e8))
+        trend_fact = "；".join(pieces) if pieces else "历史样本存在，但核心字段缺失。"
+    sections.append(("数据趋势", trend_fact))
+    anomalies = []
+    if revenue_growth is not None and profit_growth is not None and revenue_growth - profit_growth >= 10: anomalies.append("当前营收增速明显高于净利润增速，可能存在利润率承压或费用增长较快的线索。")
+    if revenue_growth is not None and profit_growth is not None and profit_growth - revenue_growth >= 10: anomalies.append("当前净利润增速明显高于营收增速，可能存在利润率改善或低基数效应的线索。")
+    fcf_ratio = (fcf or {}).get("ocf_to_profit")
+    if fcf_ratio is not None and fcf_ratio < 0.7: anomalies.append("经营现金流/净利润仅%.2f倍，利润现金含量偏弱。" % fcf_ratio)
+    if len(t) >= 2:
+        for ratio_col, label in [("应收/营收","应收/营收"),("存货/营收","存货/营收"),("商誉/总资产","商誉/总资产")]:
+            if ratio_col in t.columns:
+                s = pd.to_numeric(t[ratio_col], errors="coerce").dropna()
+                if len(s) >= 2 and float(s.iloc[-1] - s.iloc[0]) >= 0.05: anomalies.append("%s较历史样本上升约%.1f个百分点。" % (label, float(s.iloc[-1] - s.iloc[0]) * 100))
+    if (fcf or {}).get("hard_veto"): anomalies.append("自由现金流模块触发硬风险，不能用低估值解释或覆盖该风险。")
+    sections.append(("异常识别", "；".join(anomalies) if anomalies else "当前已接入指标未发现明显异常信号；仍需结合年报附注核查。"))
+    causes = []
+    if "应收/营收" in t.columns:
+        s = pd.to_numeric(t["应收/营收"], errors="coerce").dropna()
+        if len(s) >= 2 and float(s.iloc[-1] - s.iloc[0]) >= 0.05: causes.append("应收占比上升的可能原因包括信用政策变化、客户结构变化或回款周期拉长。")
+    if "存货/营收" in t.columns:
+        s = pd.to_numeric(t["存货/营收"], errors="coerce").dropna()
+        if len(s) >= 2 and float(s.iloc[-1] - s.iloc[0]) >= 0.05: causes.append("存货占比上升的可能原因包括备货扩张、需求变化或产品去库存速度下降。")
+    if (fcf or {}).get("capex_to_ocf") is not None and (fcf or {}).get("capex_to_ocf") >= 1: causes.append("资本开支占经营现金流较高，可能处于扩产或设备投入阶段；需要核查投入回报和产能利用率。")
+    if not causes: causes.append("当前结构化数据无法可靠识别具体经营原因，避免用猜测替代事实。")
+    sections.append(("原因线索", "；".join(causes)))
+    risks = []
+    if (fcf or {}).get("hard_veto"): risks.append("经营现金流/利润匹配出现硬风险。")
+    elif (fcf or {}).get("level") not in {None,"良好","数据不足"}: risks.append("自由现金流状态：%s。" % (fcf or {}).get("level"))
+    if debt is not None and debt >= 70: risks.append("资产负债率为%.1f%%，杠杆水平较高。" % debt)
+    if governance.get("level") == "需要关注": risks.append("公司治理模块存在需要关注事项。")
+    if vr.get("valuation_status") in {"高估区","偏贵区"}: risks.append("当前估值状态：%s。" % vr.get("valuation_status"))
+    sections.append(("核心风险", "；".join(risks) if risks else "当前风险模块未发现高优先级异常，但不能替代年报和公告核查。"))
+    value_parts = []
+    if score.get("data_confidence"): value_parts.append("研究可信度为%s" % score.get("data_confidence"))
+    if roe is not None: value_parts.append("ROE约%.1f%%" % roe)
+    if annual_debt is not None: value_parts.append("资产负债率约%.1f%%" % annual_debt)
+    if vr.get("normal") is not None and vr.get("safety_margin") is not None: value_parts.append("中性价值%.2f元，当前价格相对合理价值折溢价%+.1f%%" % (float(vr["normal"]), float(vr["safety_margin"]) * 100))
+    value_parts.append("综合评分%s/100" % score.get("score","暂无"))
+    value_parts.append("研究状态：%s" % score.get("research_status","暂无"))
+    sections.append(("投资价值", "；".join(value_parts) + "。以上为模型化研究结果，最终决策仍应结合业务理解和最新公告。"))
+    return sections
+
+
 def report_values(data):
     return {"revenue":lastv(data.get("profit"),["营业总收入","营业收入","一、营业总收入"]),"net_profit":lastv(data.get("profit"),["归属于母公司所有者的净利润","归属于母公司股东的净利润","净利润","五、净利润"]),"receivable":lastv(data.get("balance"),["应收账款","应收款项"]),"inventory":lastv(data.get("balance"),["存货"]),"ocf":lastv(data.get("cashflow"),["经营活动产生的现金流量净额","经营活动现金流量净额"])}
 
@@ -449,7 +567,18 @@ if not governance.get("available"):
 st.header("📈 六、5年财务质量")
 fq=calculate_financial_quality(trend,cash_ratio)
 a,b=st.columns(2); a.metric("财务质量评分",f"{fq['score']}/100"); b.metric("财务质量评级",fq["rating"])
-if trend is not None and not trend.empty: st.dataframe(trend,use_container_width=True,hide_index=True)
+if trend is not None and not trend.empty:
+    st.dataframe(trend,use_container_width=True,hide_index=True)
+
+v19_trend=build_v19_financial_trend(data)
+if v19_trend is not None and not v19_trend.empty:
+    st.subheader("📉 5年核心质量趋势")
+    chart_cols=[x for x in ["应收/营收","存货/营收","商誉/总资产","资本开支/经营现金流"] if x in v19_trend.columns]
+    if chart_cols:
+        trend_display=v19_trend[["年份"]+chart_cols].copy().set_index("年份") * 100
+        trend_display.columns=[f"{x}（%）" for x in chart_cols]
+        st.line_chart(trend_display)
+    st.caption("趋势图使用已加载年报/现金流数据；相关比率用于趋势观察，不单独构成投资结论。")
 
 st.header("💰 七、当前价值估值")
 override=st.selectbox("🧠 估值模型（默认自动识别，可手动调整）",["自动识别","普通成长/制造","成长科技","银行","保险","券商","周期"],index=0)
@@ -588,6 +717,22 @@ st.dataframe(step_table,use_container_width=True,hide_index=True)
 st.caption("说明：十步分析严格区分财务事实、量化代理指标与需人工核查事项；第2步护城河、第9步治理、第8步商誉/减值不能仅凭单一财务指标自动下结论。")
 
 
+st.header("📝 十二、自动研究报告 V19")
+research_report=build_v19_research_report(
+    trend_df=v19_trend,
+    latest=latest,
+    annual_roe=annual_roe,
+    annual_debt=annual_debt,
+    fcf=fcf,
+    governance=governance,
+    vr=vr,
+    score=score,
+)
+for title, text_value in research_report:
+    st.subheader("🔹 " + title)
+    st.write(text_value)
+st.caption("V19说明：报告把已实现数据、模型规则与可能原因分开；原因段是研究线索，不是对公司经营事实的断言。")
+
 st.header("🎯 十一、最终投资决策")
 decision_risk_level="高风险" if (risk_hard_veto or fcf_hard_veto) else score["risk_level"]
 decision=make_investment_decision(investment_score=score["score"],valuation_level=score["valuation_level"],historical_level=score["historical_level"],risk_level=decision_risk_level)
@@ -611,7 +756,7 @@ gap_text="暂无" if gap is None else f"{gap:+.1f}%"
 result_class="vs-result-good" if score["score"]>=75 else "vs-result-mid" if score["score"]>=60 else "vs-result-bad"
 result_slot.markdown(f'<div class="vs-result {result_class}"><div class="vs-result-title">🎯 {name} · 核心研究结论</div><div class="vs-result-main">{decision["decision"]} · {decision["action"]}</div><div class="vs-result-sub">综合评分 {score["score"]}/100　｜　当前价格 {price_text}　｜　中性合理价 {normal_text}　｜　安全边际 {gap_text}</div><div class="vs-result-sub">估值：{score["valuation_level"]}　｜　历史估值：{score["historical_level"]}　｜　风险：{decision_risk_level}　｜　治理：{governance.get('level','数据不足')}　｜　建议仓位：{decision["position"]}</div></div>',unsafe_allow_html=True)
 
-st.header("🏆 十二、最终投资结论")
+st.header("🏆 十四、最终投资结论")
 if risk_hard_veto or fcf_hard_veto: conclusion="🔴 触发财务风险否决：现金流/资产质量问题优先，不能用低估值抵消核心风险。"
 elif governance.get("hard_veto"): conclusion="🔴 触发公司治理风险否决：建议在关键治理风险澄清前保持谨慎。"
 elif score["score"]>=85: conclusion="🟢 公司质量与估值较匹配，值得重点研究。"
@@ -626,6 +771,6 @@ if risk.get("risk_items"):
 
 render_watchlist_dashboard()
 
-st.header("🛠️ 十三、系统诊断")
-st.dataframe(pd.DataFrame({"模块":["fast_data.py","financial.py","risk.py","fcf_analysis.py","governance_analysis.py","valuation.py","adaptive_valuation.py","earnings_basis.py","growth_quality.py","historical_valuation.py","peer_compare.py","industry.py","investment_score.py","investment_decision.py","10步价值投资"],"状态":["✅","✅","✅","✅" if fcf.get("available") else "⏳","✅" if governance.get("available") else "⏳","✅","✅","✅" if earn.get("valuation_eps") is not None else "⏳","✅" if gq is not None else "⏳","✅" if hist is not None and not hist.empty else "⏳","✅" if peer_score is not None else "⏳","✅" if peer_codes else "⏳","✅","✅","✅"]}),use_container_width=True,hide_index=True)
-st.divider(); st.caption("A股价值研投｜ValueStock AI V18：10步价值投资 + 正常化EPS + 盈利兑现 + 成长质量 + 自由现金流 + 历史估值 + 同行比较 + 安全边际 + 风险否决 + 公司治理 + 综合投资决策")
+st.header("🛠️ 十五、系统诊断")
+st.dataframe(pd.DataFrame({"模块":["fast_data.py","financial.py","risk.py","fcf_analysis.py","governance_analysis.py","valuation.py","adaptive_valuation.py","earnings_basis.py","growth_quality.py","historical_valuation.py","peer_compare.py","industry.py","investment_score.py","investment_decision.py","10步价值投资","V19研究报告","V19财务趋势"],"状态":["✅","✅","✅","✅" if fcf.get("available") else "⏳","✅" if governance.get("available") else "⏳","✅","✅","✅" if earn.get("valuation_eps") is not None else "⏳","✅" if gq is not None else "⏳","✅" if hist is not None and not hist.empty else "⏳","✅" if peer_score is not None else "⏳","✅" if peer_codes else "⏳","✅","✅","✅"]}),use_container_width=True,hide_index=True)
+st.divider(); st.caption("A股价值研投｜ValueStock AI V19：10步价值投资 + 自动研究报告 + 5年财务趋势 + 正常化EPS + 盈利兑现 + 成长质量 + 自由现金流 + 历史估值 + 同行比较 + 安全边际 + 风险否决 + 公司治理 + 综合投资决策")
