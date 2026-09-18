@@ -43,22 +43,47 @@ def _report(code,typ):
     return x
 
 def _shareholders(code):
-    """主要股东/十大股东：用于治理分析；优先新浪主要股东，失败回退东方财富十大股东。"""
-    x=_safe_call(lambda: ak.stock_main_stock_holder(stock=code))
+    """主要股东/十大股东：多接口兼容，统一只返回最新一期。"""
+    symbol = str(code)
+    candidates = [
+        lambda: ak.stock_main_stock_holder(stock=symbol),
+        lambda: ak.stock_main_stock_holder(symbol=symbol),
+        lambda: ak.stock_main_stock_holder(stock=_market_prefix(symbol) + symbol),
+        lambda: ak.stock_gdfx_top_10_em(symbol=symbol),
+        lambda: ak.stock_gdfx_top_10_em(symbol=_market_prefix(symbol) + symbol),
+    ]
+    x = None
+    for fn in candidates:
+        x = _safe_call(fn)
+        if x is not None:
+            break
     if x is None:
-        symbol=_market_prefix(code)+code
-        x=_safe_call(lambda: ak.stock_gdfx_top_10_em(symbol=symbol))
-    if x is None: return None
+        return None
+
     try:
-        date_col=next((c for c in ["截至日期","报告日期","报告期","日期"] if c in x.columns),None)
+        date_col = next(
+            (
+                c for c in
+                ["截至日期", "报告日期", "报告期", "日期", "公告日期"]
+                if c in x.columns
+            ),
+            None,
+        )
         if date_col is not None:
-            y=x.copy(); y["_sort_date"]=pd.to_datetime(y[date_col],errors="coerce")
-            latest=y["_sort_date"].max()
+            y = x.copy()
+            y["_share_date"] = pd.to_datetime(
+                y[date_col], errors="coerce"
+            )
+            latest = y["_share_date"].max()
             if pd.notna(latest):
-                y=y[y["_sort_date"]==latest].copy()
-            return y.drop(columns=["_sort_date"],errors="ignore").reset_index(drop=True)
+                y = y[y["_share_date"] == latest].copy()
+            return (
+                y.drop(columns=["_share_date"], errors="ignore")
+                .reset_index(drop=True)
+            )
     except Exception:
         pass
+
     return x.reset_index(drop=True)
 
 def _market(code,hist):
