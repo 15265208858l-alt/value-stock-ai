@@ -520,6 +520,52 @@ def build_v19_research_report(trend_df, latest, annual_roe, annual_debt, fcf, go
     return sections
 
 
+def build_v20_radar(score, risk_score, risk_hard_veto, fcf_hard_veto, governance, gap, step_table):
+    def norm(value, maximum):
+        try:
+            if value is None:
+                return None
+            return max(0.0, min(100.0, float(value) / float(maximum) * 100.0))
+        except Exception:
+            return None
+
+    dimensions = [
+        ("企业质量", norm(score.get("financial_component"), 25), "长期财务质量、ROE与盈利能力"),
+        ("成长能力", norm(score.get("growth_component"), 15), "营收与净利润增长"),
+        ("现金流质量", norm(score.get("cashflow_component"), 15), "经营现金流/利润匹配"),
+        ("资产负债", norm(score.get("balance_component"), 10), "杠杆与资产负债表"),
+        ("营运资本", norm(score.get("working_capital_component"), 10), "应收与存货质量"),
+        ("当前估值", norm(score.get("absolute_valuation_component"), 10), "当前价格相对模型价值"),
+        ("历史估值", norm(score.get("historical_component"), 5), "当前估值所处历史分位"),
+        ("同行竞争", norm(score.get("peer_component"), 5), "相对同行竞争力"),
+        ("盈利兑现", norm(score.get("earnings_realization_component"), 5), "利润转化为现金的质量"),
+    ]
+
+    valid = [x for x in dimensions if x[1] is not None]
+    weak = sorted(valid, key=lambda x: x[1])[:2]
+    risk_level = "高风险 / 否决" if (risk_hard_veto or fcf_hard_veto) else score.get("risk_level", "数据不足")
+    risk_value = None if risk_score is None else max(0.0, min(100.0, 100.0 - float(risk_score) * 10.0))
+    safety_value = None if gap is None else max(0.0, min(100.0, 50.0 + float(gap) * 2.0))
+
+    steps_done = 0
+    steps_total = 10
+    if step_table is not None and not step_table.empty and "判断" in step_table.columns:
+        for v in step_table["判断"].astype(str).tolist():
+            if not v.startswith("⚪") and "数据不足" not in v:
+                steps_done += 1
+
+    return {
+        "dimensions": dimensions,
+        "weak": weak,
+        "risk_level": risk_level,
+        "risk_value": risk_value,
+        "safety_value": safety_value,
+        "steps_done": steps_done,
+        "steps_total": steps_total,
+        "data_confidence": score.get("data_confidence", "暂无"),
+    }
+
+
 def report_values(data):
     return {"revenue":lastv(data.get("profit"),["营业总收入","营业收入","一、营业总收入"]),"net_profit":lastv(data.get("profit"),["归属于母公司所有者的净利润","归属于母公司股东的净利润","净利润","五、净利润"]),"receivable":lastv(data.get("balance"),["应收账款","应收款项"]),"inventory":lastv(data.get("balance"),["存货"]),"ocf":lastv(data.get("cashflow"),["经营活动产生的现金流量净额","经营活动现金流量净额"])}
 
@@ -694,6 +740,51 @@ st.write(f"当前估值判断：**{score['valuation_level']}**"); st.write(f"历
 if score.get("relative_valuation_available"): st.write(f"同行相对估值：**{score['relative_valuation_level']}**｜同行PE中位数 {score.get('peer_median_pe','暂无')}倍｜目标PE/同行中位 {score.get('relative_pe_ratio','暂无')}")
 
 st.header("🧭 十一、长期价值投资10步分析 V18")
+st.header("🛰️ V20 价值投资雷达")
+radar=build_v20_radar(
+    score=score,
+    risk_score=effective_risk_score,
+    risk_hard_veto=risk_hard_veto,
+    fcf_hard_veto=fcf_hard_veto,
+    governance=governance,
+    gap=gap,
+    step_table=step_table,
+)
+
+rc1,rc2,rc3,rc4=st.columns(4)
+rc1.metric("综合评分",f"{score['score']}/100")
+rc2.metric("研究可信度",radar["data_confidence"])
+rc3.metric("10步完成度",f"{radar['steps_done']}/{radar['steps_total']}")
+rc4.metric("安全边际","暂无" if gap is None else f"{gap:+.1f}%")
+
+st.markdown("### 🔎 核心能力雷达")
+radar_cols=st.columns(3)
+for idx,(label,value,desc) in enumerate(radar["dimensions"]):
+    col_ui=radar_cols[idx % 3]
+    with col_ui:
+        show_value="数据不足" if value is None else f"{value:.0f}/100"
+        bar_width=0 if value is None else int(value)
+        col_ui.markdown(
+            f'<div style="padding:10px 12px;border:1px solid #e8edf3;border-radius:14px;background:#fff;margin-bottom:9px">'
+            f'<div style="display:flex;justify-content:space-between;font-weight:800;color:#172033"><span>{label}</span><span>{show_value}</span></div>'
+            f'<div style="font-size:.70rem;color:#728097;margin:3px 0 7px">{desc}</div>'
+            f'<div style="height:7px;background:#edf1f5;border-radius:99px;overflow:hidden"><div style="height:7px;width:{bar_width}%;background:linear-gradient(90deg,#d4a94d,#2563a8);border-radius:99px"></div></div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+weak_text="、".join([x[0] for x in radar["weak"]]) if radar["weak"] else "暂无"
+st.caption(f"🧩 当前模型相对短板：{weak_text}｜风险状态：{radar['risk_level']}")
+if radar["risk_level"]=="高风险 / 否决":
+    st.error("⛔ 风险闸门已触发：估值便宜不能抵消核心财务风险。")
+elif radar["risk_value"] is not None and radar["risk_value"] < 60:
+    st.warning("⚠️ 风险安全垫偏薄，建议优先核查风险项。")
+
+if radar["safety_value"] is not None:
+    st.progress(radar["safety_value"]/100, text=f"安全边际强度参考：{radar['safety_value']:.0f}/100（仅作可视化，不改变估值公式）")
+
+st.caption("V20定位：价值投资雷达是已有模型的解释层，不新增主观评分；“短板”仅针对已获得数据的维度，数据不足不会被当成低分。")
+
 step_table=build_value_investment_10_steps(
     industry_text=auto.get("industry") if auto else None,
     trend=trend,
@@ -774,4 +865,4 @@ render_watchlist_dashboard()
 
 st.header("🛠️ 十五、系统诊断")
 st.dataframe(pd.DataFrame({"模块":["fast_data.py","financial.py","risk.py","fcf_analysis.py","governance_analysis.py","valuation.py","adaptive_valuation.py","earnings_basis.py","growth_quality.py","historical_valuation.py","peer_compare.py","industry.py","investment_score.py","investment_decision.py","10步价值投资","V19研究报告","V19财务趋势"],"状态":["✅","✅","✅","✅" if fcf.get("available") else "⏳","✅" if governance.get("available") else "⏳","✅","✅","✅" if earn.get("valuation_eps") is not None else "⏳","✅" if gq is not None else "⏳","✅" if hist is not None and not hist.empty else "⏳","✅" if peer_score is not None else "⏳","✅" if peer_codes else "⏳","✅","✅","✅"]}),use_container_width=True,hide_index=True)
-st.divider(); st.caption("A股价值研投｜ValueStock AI V19：10步价值投资 + 自动研究报告 + 5年财务趋势 + 正常化EPS + 盈利兑现 + 成长质量 + 自由现金流 + 历史估值 + 同行比较 + 安全边际 + 风险否决 + 公司治理 + 综合投资决策")
+st.divider(); st.caption("A股价值研投｜ValueStock AI V20：价值投资雷达 + 10步价值投资 + 自动研究报告 + 5年财务趋势 + 正常化EPS + 盈利兑现 + 成长质量 + 自由现金流 + 历史估值 + 同行比较 + 安全边际 + 风险否决 + 公司治理 + 综合投资决策")
