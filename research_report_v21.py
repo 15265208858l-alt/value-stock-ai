@@ -398,7 +398,7 @@ def build_research_report_v21(payload: Dict[str, Any]) -> str:
 
 ## 十、本次研究摘要
 
-**企业质量：** {_clean_text(score.get('risk_level'), '数据不足')}  
+**财务质量：** {_fmt(score.get('financial_component'), 1)}/25  
 **综合评分：** {_fmt(score_value, 0)}/100  
 **估值状态：** {_clean_text(score.get('valuation_level'))}  
 **历史估值：** {_clean_text(score.get('historical_level'))}  
