@@ -814,6 +814,14 @@ st.caption("V20定位：价值投资雷达是已有模型的解释层，不新�
 
 st.header("📝 十二、V21 一键专业研究报告")
 
+decision_risk_level = "高风险" if (risk_hard_veto or fcf_hard_veto) else score["risk_level"]
+decision = make_investment_decision(
+    investment_score=score["score"],
+    valuation_level=score["valuation_level"],
+    historical_level=score["historical_level"],
+    risk_level=decision_risk_level,
+)
+
 v21_report = build_research_report_v21({
     "code": code,
     "name": name,
@@ -838,7 +846,7 @@ v21_report = build_research_report_v21({
     "decision": decision.get("decision", "暂无"),
     "action": decision.get("action", "暂无"),
     "position": decision.get("position", "暂无"),
-    "decision_risk_level": decision_risk_level if "decision_risk_level" in globals() else ("高风险" if (risk_hard_veto or fcf_hard_veto) else score.get("risk_level")),
+    "decision_risk_level": decision_risk_level,
     "radar_weak": [x[0] for x in radar.get("weak", [])],
     "trend": v19_trend,
     "step_table": step_table,
@@ -857,8 +865,6 @@ st.download_button(
 )
 
 st.header("🎯 十三、最终投资决策")
-decision_risk_level="高风险" if (risk_hard_veto or fcf_hard_veto) else score["risk_level"]
-decision=make_investment_decision(investment_score=score["score"],valuation_level=score["valuation_level"],historical_level=score["historical_level"],risk_level=decision_risk_level)
 a,b,c=st.columns(3); a.metric("投资决策",decision["decision"]); b.metric("建议操作",decision["action"]); c.metric("建议仓位",decision["position"]); st.info("💡 决策理由："+decision["reason"])
 
 record_research_snapshot(code=code,name=name,price=price,score=score.get("score"),rating=score.get("rating"),decision=decision.get("decision"),action=decision.get("action"),position=decision.get("position"),normal_value=vr.get("normal"),safety_margin=gap,valuation_level=score.get("valuation_level"),historical_level=score.get("historical_level"),risk_level=decision_risk_level)
