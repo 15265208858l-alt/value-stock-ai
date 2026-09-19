@@ -740,6 +740,29 @@ st.write(f"当前估值判断：**{score['valuation_level']}**"); st.write(f"历
 if score.get("relative_valuation_available"): st.write(f"同行相对估值：**{score['relative_valuation_level']}**｜同行PE中位数 {score.get('peer_median_pe','暂无')}倍｜目标PE/同行中位 {score.get('relative_pe_ratio','暂无')}")
 
 st.header("🧭 十一、长期价值投资10步分析 V18")
+step_table=build_value_investment_10_steps(
+    industry_text=auto.get("industry") if auto else None,
+    trend=trend,
+    annual_roe=annual_roe,
+    annual_debt=annual_debt,
+    latest_revenue_growth=latest.get("revenue_growth"),
+    latest_profit_growth=latest.get("profit_growth"),
+    cashflow_ratio=cash_ratio,
+    receivable_ratio=None if rv["revenue"] in {None,0} else (rv["receivable"]/rv["revenue"] if rv["receivable"] is not None else None),
+    inventory_ratio=None if rv["revenue"] in {None,0} else (rv["inventory"]/rv["revenue"] if rv["inventory"] is not None else None),
+    fcf_result=fcf,
+    governance_result=governance,
+    peer_score=peer_score,
+    historical_eps_cagr=historical_eps_cagr,
+    historical_percentile=hs.get("percentile"),
+    current_price=price,
+    normal_value=vr.get("normal"),
+    score=score,
+    goodwill=goodwill,
+)
+st.dataframe(step_table,use_container_width=True,hide_index=True)
+st.caption("说明：十步分析严格区分财务事实、量化代理指标与需人工核查事项；第2步护城河、第9步治理、第8步商誉/减值不能仅凭单一财务指标自动下结论。")
+
 st.header("🛰️ V20 价值投资雷达")
 radar=build_v20_radar(
     score=score,
@@ -785,28 +808,7 @@ if radar["safety_value"] is not None:
 
 st.caption("V20定位：价值投资雷达是已有模型的解释层，不新增主观评分；“短板”仅针对已获得数据的维度，数据不足不会被当成低分。")
 
-step_table=build_value_investment_10_steps(
-    industry_text=auto.get("industry") if auto else None,
-    trend=trend,
-    annual_roe=annual_roe,
-    annual_debt=annual_debt,
-    latest_revenue_growth=latest.get("revenue_growth"),
-    latest_profit_growth=latest.get("profit_growth"),
-    cashflow_ratio=cash_ratio,
-    receivable_ratio=None if rv["revenue"] in {None,0} else (rv["receivable"]/rv["revenue"] if rv["receivable"] is not None else None),
-    inventory_ratio=None if rv["revenue"] in {None,0} else (rv["inventory"]/rv["revenue"] if rv["inventory"] is not None else None),
-    fcf_result=fcf,
-    governance_result=governance,
-    peer_score=peer_score,
-    historical_eps_cagr=historical_eps_cagr,
-    historical_percentile=hs.get("percentile"),
-    current_price=price,
-    normal_value=vr.get("normal"),
-    score=score,
-    goodwill=goodwill,
-)
-st.dataframe(step_table,use_container_width=True,hide_index=True)
-st.caption("说明：十步分析严格区分财务事实、量化代理指标与需人工核查事项；第2步护城河、第9步治理、第8步商誉/减值不能仅凭单一财务指标自动下结论。")
+
 
 
 st.header("📝 十二、自动研究报告 V19")
