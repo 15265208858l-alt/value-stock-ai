@@ -20,6 +20,7 @@ from account import current_account, render_account_panel
 from user_store import save_research_snapshot
 from membership_center import render_membership_center
 from watchlist_v2 import render_watchlist_dashboard, record_research_snapshot
+from research_report_v21 import build_research_report_v21
 
 st.set_page_config(page_title="A股价值研投 | ValueStock AI", page_icon="📈", layout="wide")
 
@@ -811,21 +812,49 @@ st.caption("V20定位：价值投资雷达是已有模型的解释层，不新�
 
 
 
-st.header("📝 十二、自动研究报告 V19")
-research_report=build_v19_research_report(
-    trend_df=v19_trend,
-    latest=latest,
-    annual_roe=annual_roe,
-    annual_debt=annual_debt,
-    fcf=fcf,
-    governance=governance,
-    vr=vr,
-    score=score,
+st.header("📝 十二、V21 一键专业研究报告")
+
+v21_report = build_research_report_v21({
+    "code": code,
+    "name": name,
+    "industry": auto.get("industry") if auto else None,
+    "price": price,
+    "roe": latest.get("roe") if latest.get("roe") is not None else annual_roe,
+    "debt": latest.get("debt") if latest.get("debt") is not None else annual_debt,
+    "revenue_growth": latest.get("revenue_growth"),
+    "profit_growth": latest.get("profit_growth"),
+    "cash_ratio": cash_ratio,
+    "annual_eps": annual_eps,
+    "normalized_eps": normalized_eps,
+    "historical_percentile": hs.get("percentile"),
+    "peer_score": peer_score,
+    "relative_valuation_level": score.get("relative_valuation_level"),
+    "historical_level": score.get("historical_level"),
+    "valuation": vr,
+    "fcf": fcf,
+    "governance": governance,
+    "risk": risk,
+    "score": score,
+    "decision": decision.get("decision", "暂无"),
+    "action": decision.get("action", "暂无"),
+    "position": decision.get("position", "暂无"),
+    "decision_risk_level": decision_risk_level if "decision_risk_level" in globals() else ("高风险" if (risk_hard_veto or fcf_hard_veto) else score.get("risk_level")),
+    "radar_weak": [x[0] for x in radar.get("weak", [])],
+    "trend": v19_trend,
+    "step_table": step_table,
+})
+
+st.caption("V21：把本次研究结果整理成“公司画像 → 10步检查 → 财务趋势 → 现金流 → 估值 → 同行 → 风险 → 跟踪指标”的完整研究报告。")
+with st.expander("📖 展开查看完整 V21 研究报告", expanded=True):
+    st.markdown(v21_report)
+
+st.download_button(
+    "📄 下载 V21 研究报告（Markdown）",
+    data=v21_report,
+    file_name=f"A股价值研投_{code}_V21研究报告.md",
+    mime="text/markdown",
+    use_container_width=True,
 )
-for title, text_value in research_report:
-    st.subheader("🔹 " + title)
-    st.write(text_value)
-st.caption("V19说明：报告把已实现数据、模型规则与可能原因分开；原因段是研究线索，不是对公司经营事实的断言。")
 
 st.header("🎯 十三、最终投资决策")
 decision_risk_level="高风险" if (risk_hard_veto or fcf_hard_veto) else score["risk_level"]
@@ -866,5 +895,5 @@ if risk.get("risk_items"):
 render_watchlist_dashboard()
 
 st.header("🛠️ 十五、系统诊断")
-st.dataframe(pd.DataFrame({"模块":["fast_data.py","financial.py","risk.py","fcf_analysis.py","governance_analysis.py","valuation.py","adaptive_valuation.py","earnings_basis.py","growth_quality.py","historical_valuation.py","peer_compare.py","industry.py","investment_score.py","investment_decision.py","10步价值投资","V19研究报告","V19财务趋势"],"状态":["✅","✅","✅","✅" if fcf.get("available") else "⏳","✅" if governance.get("available") else "⏳","✅","✅","✅" if earn.get("valuation_eps") is not None else "⏳","✅" if gq is not None else "⏳","✅" if hist is not None and not hist.empty else "⏳","✅" if peer_score is not None else "⏳","✅" if peer_codes else "⏳","✅","✅","✅"]}),use_container_width=True,hide_index=True)
-st.divider(); st.caption("A股价值研投｜ValueStock AI V20：价值投资雷达 + 10步价值投资 + 自动研究报告 + 5年财务趋势 + 正常化EPS + 盈利兑现 + 成长质量 + 自由现金流 + 历史估值 + 同行比较 + 安全边际 + 风险否决 + 公司治理 + 综合投资决策")
+st.dataframe(pd.DataFrame({"模块":["fast_data.py","financial.py","risk.py","fcf_analysis.py","governance_analysis.py","valuation.py","adaptive_valuation.py","earnings_basis.py","growth_quality.py","historical_valuation.py","peer_compare.py","industry.py","investment_score.py","investment_decision.py","10步价值投资","V21专业研究报告","V19财务趋势"],"状态":["✅","✅","✅","✅" if fcf.get("available") else "⏳","✅" if governance.get("available") else "⏳","✅","✅","✅" if earn.get("valuation_eps") is not None else "⏳","✅" if gq is not None else "⏳","✅" if hist is not None and not hist.empty else "⏳","✅" if peer_score is not None else "⏳","✅" if peer_codes else "⏳","✅","✅","✅"]}),use_container_width=True,hide_index=True)
+st.divider(); st.caption("A股价值研投｜ValueStock AI V21：一键专业研究报告 + 价值投资雷达 + 10步价值投资 + 5年财务趋势 + 正常化EPS + 盈利兑现 + 成长质量 + 自由现金流 + 历史估值 + 同行比较 + 安全边际 + 风险否决 + 公司治理 + 综合投资决策")
