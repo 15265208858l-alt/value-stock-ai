@@ -198,13 +198,25 @@ def load_peer_snapshots(codes_tuple):
         except Exception: pass
     _PEER_CACHE[key]=(now,out); return out
 
+def _watch_history(code):
+    """股票池专用短区间行情，避免下载多年历史。"""
+    from datetime import datetime, timedelta
+    end = datetime.now().strftime("%Y%m%d")
+    start = (datetime.now() - timedelta(days=15)).strftime("%Y%m%d")
+    x = _safe_call(lambda: ak.stock_zh_a_hist(symbol=code, period="daily", start_date=start, end_date=end, adjust=""))
+    if x is None:
+        x = _safe_call(lambda: ak.stock_zh_a_hist_tx(symbol=_market_prefix(code)+code, start_date=start, end_date=end, adjust=""))
+    if x is None:
+        return None
+    return x.rename(columns={"date":"日期","close":"收盘","open":"开盘","high":"最高","low":"最低","volume":"成交量","amount":"成交额"})
+
 def load_watchlist_quotes(codes_tuple):
-    """股票池专用轻量行情：只请求历史行情，不触发财务/估值主链路。"""
+    """股票池专用轻量行情：只请求最近15天行情，不触发财务/估值主链路。"""
     codes=tuple(sorted(set(clean_stock_code(c) for c in (codes_tuple or ()) if clean_stock_code(c))))
     if not codes: return {}
     key=",".join(codes); now=time.time(); cached=_WATCH_QUOTE_CACHE.get(key)
     if cached and now-cached[0]<WATCH_QUOTE_TTL: return cached[1]
-    tasks={f"w{i}":(lambda c=c: (c,_history(c))) for i,c in enumerate(codes)}
+    tasks={f"w{i}":(lambda c=c: (c,_watch_history(c))) for i,c in enumerate(codes)}
     raw=_run_tasks(tasks,workers=min(8,max(1,len(codes))),timeout=12)
     out={}
     for value in raw.values():
