@@ -737,7 +737,7 @@ score=calculate_investment_score(financial_score=fq["score"],peer_score=peer_sco
 a,b=st.columns(2); a.metric("投资价值评分",f"{score['score']}/100"); b.metric("投资评级",score["rating"])
 st.caption(f"研究可信度：{score.get('data_confidence','暂无')}｜数据模块：{score.get('data_available_count',0)}/9｜数据闸门：{score.get('data_gate','暂无')}｜研究状态：{score.get('research_status','暂无')}")
 st.dataframe(pd.DataFrame({"分析维度":["财务质量","成长质量","现金流质量","资产负债","营运资本","当前估值","历史估值","同行竞争力","盈利兑现"],"满分":[25,15,15,10,10,10,5,5,5],"实际得分":[score["financial_component"],score["growth_component"],score["cashflow_component"],score["balance_component"],score["working_capital_component"],score["absolute_valuation_component"],score["historical_component"],score["peer_component"],score["earnings_realization_component"]]}).round(1),use_container_width=True,hide_index=True)
-st.write(f"当前估值判断：**{score['valuation_level']}**"); st.write(f"历史估值判断：**{score['historical_level']}**"); st.write(f"风险判断：**{score['risk_level']}**"); st.write(f"公司治理判断：**{governance.get('level','数据不足')}**")
+st.write(f"当前估值判断：**{score['valuation_level']}**"); st.write(f"历史估值判断：**{score['historical_level']}**"); st.write(f"风险判断：**{score['risk_level']}**"); st.write(f"公司治理判断：**{governance_level}**")
 if score.get("relative_valuation_available"): st.write(f"同行相对估值：**{score['relative_valuation_level']}**｜同行PE中位数 {score.get('peer_median_pe','暂无')}倍｜目标PE/同行中位 {score.get('relative_pe_ratio','暂无')}")
 
 st.header("🧭 十一、长期价值投资10步分析 V18")
@@ -875,6 +875,7 @@ if account:
     except Exception:
         pass
 
+governance_level = governance.get("level", "数据不足")
 st.markdown('<div class="vs-explain"><b>🎯 核心研究结论</b></div>',unsafe_allow_html=True)
 a,b,c,d=st.columns(4); a.metric("综合评分",f"{score['score']}/100"); b.metric("中性合理价","暂无" if vr.get("normal") is None else f"{vr['normal']:.2f} 元"); c.metric("当前价格","暂无" if price is None else f"{price:.2f} 元"); d.metric("安全边际","暂无" if gap is None else f"{gap:+.1f}%")
 st.markdown(f'<div class="vs-company">{name} <span class="vs-badge">{score["rating"]}</span></div><div class="vs-explain">最终建议：<b>{decision["decision"]}</b>｜操作：{decision["action"]}｜仓位：{decision["position"]}<br>估值：{score["valuation_level"]}｜历史估值：{score["historical_level"]}｜风险：{decision_risk_level}｜治理：{governance.get("level","数据不足")}<br>研究可信度：{score.get("data_confidence","暂无")}｜状态：{score.get("research_status","暂无")}</div>',unsafe_allow_html=True)
@@ -883,7 +884,7 @@ normal_text="暂无" if vr.get("normal") is None else f"{vr['normal']:.2f} 元"
 price_text="暂无" if price is None else f"{price:.2f} 元"
 gap_text="暂无" if gap is None else f"{gap:+.1f}%"
 result_class="vs-result-good" if score["score"]>=75 else "vs-result-mid" if score["score"]>=60 else "vs-result-bad"
-result_slot.markdown(f'<div class="vs-result {result_class}"><div class="vs-result-title">🎯 {name} · 核心研究结论</div><div class="vs-result-main">{decision["decision"]} · {decision["action"]}</div><div class="vs-result-sub">综合评分 {score["score"]}/100　｜　当前价格 {price_text}　｜　中性合理价 {normal_text}　｜　安全边际 {gap_text}</div><div class="vs-result-sub">估值：{score["valuation_level"]}　｜　历史估值：{score["historical_level"]}　｜　风险：{decision_risk_level}　｜　治理：{governance.get('level','数据不足')}　｜　建议仓位：{decision["position"]}</div></div>',unsafe_allow_html=True)
+result_slot.markdown(f'<div class="vs-result {result_class}"><div class="vs-result-title">🎯 {name} · 核心研究结论</div><div class="vs-result-main">{decision["decision"]} · {decision["action"]}</div><div class="vs-result-sub">综合评分 {score["score"]}/100　｜　当前价格 {price_text}　｜　中性合理价 {normal_text}　｜　安全边际 {gap_text}</div><div class="vs-result-sub">估值：{score["valuation_level"]}　｜　历史估值：{score["historical_level"]}　｜　风险：{decision_risk_level}　｜　治理：{governance_level}　｜　建议仓位：{decision["position"]}</div></div>',unsafe_allow_html=True)
 
 st.header("🏆 十四、最终投资结论")
 if risk_hard_veto or fcf_hard_veto: conclusion="🔴 触发财务风险否决：现金流/资产质量问题优先，不能用低估值抵消核心风险。"
